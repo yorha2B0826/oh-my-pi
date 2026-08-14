@@ -746,7 +746,13 @@ function commandBasename(command: string): string {
 	return separator === -1 ? command : command.slice(separator + 1);
 }
 
-function isRustAnalyzerClient(client: LspClient): boolean {
+/**
+ * True when this client speaks the rust-analyzer protocol, detected by the
+ * command basename (`rust-analyzer[.exe]`) of the configured or resolved
+ * binary. Callers use it to gate rust-analyzer-only requests such as
+ * `rust-analyzer/reloadWorkspace` (see {@link reloadServer}).
+ */
+export function isRustAnalyzerClient(client: LspClient): boolean {
 	return (
 		commandBasename(client.config.command) === "rust-analyzer" ||
 		(client.config.resolvedCommand ? commandBasename(client.config.resolvedCommand) === "rust-analyzer" : false)

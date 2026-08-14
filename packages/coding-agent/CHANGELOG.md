@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `lsp reload` crashing non-rust-analyzer language servers (e.g. Roslyn/`roslyn-language-server`) by sending the rust-analyzer-specific `rust-analyzer/reloadWorkspace` request to every server; the request is now gated on the server being rust-analyzer, and all other servers reload via `workspace/didChangeConfiguration` directly ([#8571](https://github.com/can1357/oh-my-pi/issues/8571)).
+
 ## [17.3.4] - 2026-08-14
 
 ### Changed
