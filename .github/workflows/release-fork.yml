@@ -1,0 +1,86 @@
+name: Release (fork)
+
+# Fork-specific release: build the per-platform `omp` binaries on hosted runners
+# and publish a GitHub Release. This deliberately does NOT use upstream's
+# omp-kata self-hosted runners, bazel remote cache, Apple Developer ID signing,
+# npm trusted publishing, or HOMEBREW_TAP_DEPLOY_KEY — none of which exist on this
+# fork. The native addon is built with the cargo backend
+# (OMP_NATIVE_BUILD_BACKEND=cargo), which needs only the Rust toolchain, no Bazel.
+
+on:
+   workflow_dispatch:
+      inputs:
+         version:
+            description: "Version tag to release (e.g. 17.3.4). Leave empty to use default."
+            type: string
+            required: false
+
+permissions:
+   contents: read
+
+jobs:
+   build:
+      name: Build ${{ matrix.target_id }}
+      strategy:
+         fail-fast: false
+         matrix:
+            include:
+               - target_id: darwin-arm64
+                 runner: macos-14
+               - target_id: darwin-x64
+                 runner: macos-13
+               - target_id: linux-x64
+                 runner: ubuntu-22.04
+               - target_id: linux-arm64
+                 runner: ubuntu-24.04-arm
+      runs-on: ${{ matrix.runner }}
+      steps:
+         - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+         - uses: ./.github/actions/bun-install
+         - name: Build native addon (cargo backend)
+           env:
+              OMP_NATIVE_BUILD_BACKEND: cargo
+           run: bun run --cwd packages/natives build
+         - name: Build release binary
+           run: bun run ci:release:build-binaries --targets ${{ matrix.target_id }}
+         - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+           with:
+              name: omp-binary-${{ matrix.target_id }}
+              path: packages/coding-agent/binaries/omp-*
+              if-no-files-found: error
+
+   release:
+      name: Publish GitHub release
+      needs: build
+      runs-on: ubuntu-22.04
+      permissions:
+         contents: write
+      steps:
+         - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+         - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+           with:
+              bun-version: "1.3"
+         - name: Resolve version tag
+           id: version
+           run: |
+              version="${{ github.event.inputs.version }}"
+              if [ -z "$version" ]; then
+                version="$(node -e "const p=require('./packages/coding-agent/package.json');console.log(p.version)")"
+              fi
+              echo "tag=v${version#v}" >> "$GITHUB_OUTPUT"
+         - name: Download release binaries
+           uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+           with:
+              pattern: omp-binary-*
+              path: packages/coding-agent/binaries
+              merge-multiple: true
+         - name: Generate checksums
+           run: bun run ci:release:checksums SHA256SUMS.txt packages/coding-agent/binaries/omp-*
+         - name: Create GitHub Release
+           uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+           with:
+              tag_name: ${{ steps.version.outputs.tag }}
+              files: |
+                 packages/coding-agent/binaries/omp-*
+                 SHA256SUMS.txt
+              generate_release_notes: true
