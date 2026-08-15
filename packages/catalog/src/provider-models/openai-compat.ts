@@ -1640,7 +1640,14 @@ export function ustcModelManagerOptions(config?: UstcModelManagerConfig): ModelM
 					baseUrl,
 					apiKey,
 					fetch: config?.fetch,
-					mapModel: (_entry, model) => ({ ...model, reasoning: isUstcReasoningModelId(model.id) }),
+					mapModel: (_entry, model) => ({
+						...model,
+						reasoning: isUstcReasoningModelId(model.id),
+						// USTC's `/v1/models` only carries ids, no `limit.context`,
+						// so the discovered model has no context window and the
+						// status bar degrades to "<tokens>/?". Fall back to 1M.
+						contextWindow: model.contextWindow ?? 1_000_000,
+					}),
 				}),
 		}),
 	};
