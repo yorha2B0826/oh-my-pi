@@ -1620,6 +1620,58 @@ export function isUstcReasoningModelId(id: string): boolean {
 }
 
 /**
+ * USTC's `/v1/models` carries only ids — no `limit.context` — so the discovered
+ * models have no context window (status bar shows "<tokens>/?"). The gateway's
+ * per-model context windows are advertised in its model picker UI; mirror those
+ * here by id, and fall back to a conservative family default for unknown ids
+ * rather than assuming 1M everywhere.
+ */
+const USTC_MODEL_CONTEXT_WINDOWS: Record<string, number> = {
+	// DeepSeek (高阶推理层 / 高效通用层)
+	"deepseek-v4-pro": 1_000_000,
+	"deepseek-v4-flash": 1_000_000,
+	"deepseek-v4-flash-ascend": 1_000_000,
+	"deepseek-v4-flash-ascend1": 700_000,
+	// GLM (高阶推理层)
+	"glm-5.2-107": 1_000_000,
+	"glm-5.2": 1_000_000,
+	// Kimi (高阶推理层)
+	k3: 600_000,
+	// Qwen (高效通用层 / 能力增强层)
+	"qwen-chat": 262_000,
+	"qwen-reasoner": 262_000,
+	"qwen3.8-chat": 262_144,
+	"qwen3.8-reasoner": 262_144,
+	"qwen3-embedding": 40_000,
+	"qwen3-reranker": 40_000,
+	// Smart routing (高效通用层)
+	"smart/default": 262_000,
+	"smart/reasoning": 262_000,
+	// OCR / utility (高效通用层)
+	"unlimited-ocr": 32_000,
+};
+
+/** Family-level fallbacks keyed by id prefix (matched longest-prefix-first). */
+const USTC_MODEL_CONTEXT_WINDOW_PREFIXES: Array<[string, number]> = [
+	["deepseek-v4-", 1_000_000],
+	["glm-", 1_000_000],
+	["qwen3-", 262_144],
+	["qwen-", 262_000],
+	["smart/", 262_000],
+];
+
+function ustcModelContextWindow(id: string): number {
+	const normalized = id.toLowerCase();
+	const exact = USTC_MODEL_CONTEXT_WINDOWS[normalized];
+	if (exact != null) return exact;
+	for (const [prefix, contextWindow] of USTC_MODEL_CONTEXT_WINDOW_PREFIXES) {
+		if (normalized.startsWith(prefix)) return contextWindow;
+	}
+	// Unknown model: err low rather than assume a generous window.
+	return 32_000;
+}
+
+/**
  * USTC's LiteLLM gateway is an OpenAI-compatible endpoint at
  * `https://api.llm.ustc.edu.cn`. Models are discovered dynamically against
  * `/v1/models` only (no static seed in models.json): the gateway is internal
@@ -1644,9 +1696,9 @@ export function ustcModelManagerOptions(config?: UstcModelManagerConfig): ModelM
 						...model,
 						reasoning: isUstcReasoningModelId(model.id),
 						// USTC's `/v1/models` only carries ids, no `limit.context`,
-						// so the discovered model has no context window and the
-						// status bar degrades to "<tokens>/?". Fall back to 1M.
-						contextWindow: model.contextWindow ?? 1_000_000,
+						// so restore each model's advertised context window by id
+						// (see USTC_MODEL_CONTEXT_WINDOWS) instead of showing "?".
+						contextWindow: model.contextWindow ?? ustcModelContextWindow(model.id),
 					}),
 				}),
 		}),
