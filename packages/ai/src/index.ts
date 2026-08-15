@@ -6,6 +6,8 @@ export * from "./auth-gateway/types";
 export * from "./auth-retry";
 export * from "./auth-storage";
 export * from "./error/rate-limit";
+export * from "./iwan/fetch";
+export * from "./iwan/route";
 export * from "./provider-details";
 export * from "./providers/anthropic";
 export * from "./providers/anthropic-client";

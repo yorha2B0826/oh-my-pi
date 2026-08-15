@@ -50,6 +50,7 @@ pub use pi_ast::language;
 pub mod power;
 
 pub mod iso;
+pub mod iwan;
 pub mod prof;
 pub mod ps;
 pub mod pty;

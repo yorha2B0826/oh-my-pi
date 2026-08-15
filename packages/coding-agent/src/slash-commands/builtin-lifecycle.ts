@@ -8,6 +8,7 @@ import { COMPACT_MODES, parseCompactArgs } from "../session/compact-modes";
 import { resolveResumableSession } from "../session/session-listing";
 import { formatShakeSummary, type ShakeMode } from "../session/shake-types";
 import { resolveToCwd } from "../tools/path-utils";
+import { handleIwanAcp } from "./helpers/iwan";
 import { commandConsumed, errorMessage, usage } from "./helpers/parse";
 import { handleSshAcp } from "./helpers/ssh";
 import type {
@@ -70,6 +71,22 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 			runtime.ctx.editor.setText("");
 			await runtime.ctx.handleSSHCommand(command.text);
 		},
+	},
+	{
+		name: "iwan",
+		description: "Connect to the USTC campus VPN tunnel",
+		acpDescription: "Manage the USTC iWAN VPN tunnel",
+		inlineHint: "<subcommand>",
+		subcommands: [
+			{ name: "login", description: "Start OAuth login; prints a URL" },
+			{ name: "connect", description: "Complete login + connect a server", usage: '[<index>] [--redirect "<url>"]' },
+			{ name: "status", description: "Show tunnel state" },
+			{ name: "servers", description: "List controller-advertised servers" },
+			{ name: "stop", description: "Tear down the tunnel" },
+			{ name: "help", description: "Show help message" },
+		],
+		allowArgs: true,
+		handle: handleIwanAcp,
 	},
 	{
 		name: "new",

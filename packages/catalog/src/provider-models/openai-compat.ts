@@ -1602,6 +1602,51 @@ export function deepseekModelManagerOptions(
 }
 
 // ---------------------------------------------------------------------------
+// 6.5.1 USTC (LiteLLM gateway at api.llm.ustc.edu.cn)
+// ---------------------------------------------------------------------------
+
+export interface UstcModelManagerConfig {
+	apiKey?: string;
+	baseUrl?: string;
+	fetch?: FetchImpl;
+}
+
+const USTC_REASONING_MODEL_ID_PATTERN = /(?:^|[-/])(?:reasoner|reasoning)(?:$|[-/])/i;
+
+/** USTC's `/models` response only carries ids, so restore its documented reasoning capability. */
+export function isUstcReasoningModelId(id: string): boolean {
+	const normalized = id.toLowerCase();
+	return normalized.startsWith("deepseek-v4-") || USTC_REASONING_MODEL_ID_PATTERN.test(normalized);
+}
+
+/**
+ * USTC's LiteLLM gateway is an OpenAI-compatible endpoint at
+ * `https://api.llm.ustc.edu.cn`. Models are discovered dynamically against
+ * `/v1/models` only (no static seed in models.json): the gateway is internal
+ * to USTC and its model list shifts with what is currently deployed, so the
+ * picker is populated entirely from `/v1/models` at runtime.
+ */
+export function ustcModelManagerOptions(config?: UstcModelManagerConfig): ModelManagerOptions<"openai-completions"> {
+	const apiKey = config?.apiKey;
+	const baseUrl = config?.baseUrl ?? "https://api.llm.ustc.edu.cn";
+	return {
+		providerId: "ustc",
+		dynamicModelsAuthoritative: true,
+		...(apiKey && {
+			fetchDynamicModels: () =>
+				fetchOpenAICompatibleModels({
+					api: "openai-completions",
+					provider: "ustc",
+					baseUrl,
+					apiKey,
+					fetch: config?.fetch,
+					mapModel: (_entry, model) => ({ ...model, reasoning: isUstcReasoningModelId(model.id) }),
+				}),
+		}),
+	};
+}
+
+// ---------------------------------------------------------------------------
 // 6.6 SiliconFlow
 // ---------------------------------------------------------------------------
 

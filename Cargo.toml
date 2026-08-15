@@ -7,6 +7,7 @@ members = [
    "crates/pi-ast",
    "crates/pi-builtins",
    "crates/pi-iso",
+   "crates/pi-iwan",
    "crates/pi-natives",
    "crates/pi-shell",
    "crates/pi-voice",
@@ -189,6 +190,7 @@ too_many_lines = "allow"     # Arbitrary limits don't account for necessary comp
 # ──────────────────────────────────────────────────────────────────────────────
 pi-ast = { path = "crates/pi-ast" }
 pi-iso = { path = "crates/pi-iso" }
+pi-iwan = { path = "crates/pi-iwan" }
 pi-shell = { path = "crates/pi-shell" }
 pi-voice = { path = "crates/pi-voice" }
 pi-walker = { path = "crates/pi-walker" }
@@ -220,6 +222,7 @@ toml = "1.1"
 # ──────────────────────────────────────────────────────────────────────────────
 anyhow = "1.0"
 bytes = "1"
+thiserror = "2.0.18"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # CLI & Configuration
@@ -251,6 +254,17 @@ smallvec = { version = "1.15.1", features = [
 # Hashing
 # ──────────────────────────────────────────────────────────────────────────────
 xxhash-rust = { version = "0.8", features = ["xxh64"] }
+md-5 = "0.10.6"
+sha2 = "0.10.9"
+hmac = "0.12.1"
+hex = "0.4.3"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Cryptography
+# ──────────────────────────────────────────────────────────────────────────────
+aes = "0.8.4"
+aes-gcm = "0.10.3"
+getrandom = "0.3"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Audio & Realtime Media

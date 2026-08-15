@@ -49,6 +49,7 @@ import {
 	syntheticModelManagerOptions,
 	togetherModelManagerOptions,
 	umansModelManagerOptions,
+	ustcModelManagerOptions,
 	veniceModelManagerOptions,
 	vercelAiGatewayModelManagerOptions,
 	vllmModelManagerOptions,
@@ -433,6 +434,13 @@ export const CATALOG_PROVIDERS = [
 		createModelManagerOptions: (config: ModelManagerConfig) => umansModelManagerOptions(config),
 		dynamicModelsAuthoritative: true,
 		catalogDiscovery: { label: "Umans AI Coding Plan", allowUnauthenticated: true },
+	},
+	{
+		id: "ustc",
+		defaultModel: "qwen3.5",
+		envVars: ["USTC_API_KEY"],
+		createModelManagerOptions: (config: ModelManagerConfig) => ustcModelManagerOptions(config),
+		catalogDiscovery: { label: "USTC" },
 	},
 	{
 		id: "venice",

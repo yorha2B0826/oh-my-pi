@@ -62,6 +62,7 @@ import { tavilyProvider } from "./tavily";
 import { togetherProvider } from "./together";
 import type { ProviderDefinition } from "./types";
 import { umansProvider } from "./umans";
+import { ustcProvider } from "./ustc";
 import { veniceProvider } from "./venice";
 import { vercelAiGatewayProvider } from "./vercel-ai-gateway";
 import { vllmProvider } from "./vllm";
@@ -117,6 +118,7 @@ const ALL = [
 	xiaomiTokenPlanCnProvider,
 	firepassProvider,
 	deepseekProvider,
+	ustcProvider,
 	metaProvider,
 	moonshotProvider,
 	cerebrasProvider,

@@ -112,6 +112,18 @@
       "types": "./src/registry/oauth/index.ts",
       "import": "./src/registry/oauth/index.ts"
     },
+    "./iwan/route": {
+      "types": "./src/iwan/route.ts",
+      "import": "./src/iwan/route.ts"
+    },
+    "./iwan/protocol": {
+      "types": "./src/iwan/protocol.ts",
+      "import": "./src/iwan/protocol.ts"
+    },
+    "./iwan/fetch": {
+      "types": "./src/iwan/fetch.ts",
+      "import": "./src/iwan/fetch.ts"
+    },
     "./oauth/*": {
       "types": "./src/registry/oauth/*.ts",
       "import": "./src/registry/oauth/*.ts"

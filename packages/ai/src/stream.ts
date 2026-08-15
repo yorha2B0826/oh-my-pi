@@ -22,6 +22,7 @@ import * as AIError from "./error";
 import { ProviderHttpError } from "./error";
 import { isInvalidatedOAuthTokenError } from "./error/auth-classify";
 import { isConcurrencyCapExclusion, isUsageLimitOutcome } from "./error/rate-limit";
+import { routeFetch as routeIwanFetch } from "./iwan/route";
 import type { BedrockOptions } from "./providers/amazon-bedrock";
 import type { AnthropicOptions } from "./providers/anthropic";
 import type { MessageCreateParamsStreaming } from "./providers/anthropic-wire";
@@ -890,6 +891,12 @@ function streamDispatch<TApi extends Api>(
 		...debugOptions,
 		fetch: wrapFetchForProxy(debugOptions.fetch, model.provider),
 	} as OptionsForApi<TApi>;
+	// Route USTC's internal gateway through the iWAN tunnel when it is up; this
+	// is a no-op (returns the existing fetch) for every other provider and when
+	// the tunnel is disconnected.
+	if (model.provider === "ustc" && requestOptions.fetch) {
+		requestOptions.fetch = routeIwanFetch(requestOptions.fetch);
+	}
 	assertExplicitOpenAIResponsesPromptCacheSupport(model, requestOptions);
 
 	// Check custom API registry first (extension-provided APIs like "vertex-claude-api")
@@ -1423,6 +1430,9 @@ function streamSimpleRequest<TApi extends Api>(
 		...debugOptions,
 		fetch: wrapFetchForProxy(debugOptions.fetch, model.provider),
 	} as SimpleStreamOptions;
+	if (model.provider === "ustc" && requestOptions.fetch) {
+		requestOptions.fetch = routeIwanFetch(requestOptions.fetch);
+	}
 
 	const apiKeyResolver = isApiKeyResolver(requestOptions?.apiKey) ? requestOptions.apiKey : undefined;
 	if (apiKeyResolver) {

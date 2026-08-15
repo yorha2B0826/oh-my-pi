@@ -1,6 +1,7 @@
 import * as path from "node:path";
 import type { ApiKeyResolver, FetchImpl } from "@oh-my-pi/pi-ai";
 import { registerCustomApi, unregisterCustomApis } from "@oh-my-pi/pi-ai/api-registry";
+import { routeFetch as routeIwanFetch } from "@oh-my-pi/pi-ai/iwan/route";
 import { registerOAuthProvider, unregisterOAuthProvider, unregisterOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
 import type { OAuthCredentials, OAuthLoginCallbacks } from "@oh-my-pi/pi-ai/oauth/types";
 import { setCodexAttestationProvider } from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
@@ -26,6 +27,7 @@ import { getBundledModels, getBundledProviders } from "@oh-my-pi/pi-catalog/mode
 import {
 	googleAntigravityModelManagerOptions,
 	googleGeminiCliModelManagerOptions,
+	isUstcReasoningModelId,
 	openaiCodexModelManagerOptions,
 	PROVIDER_DESCRIPTORS,
 	resolveModelCacheProviderId,
@@ -246,6 +248,9 @@ export class ModelRegistry {
 			(isBunTestRuntime()
 				? () => Promise.reject(new Error("network disabled in model-registry runtime test"))
 				: wrapFetchForExtraCa(fetch));
+		// Route USTC model discovery through the iWAN tunnel when it is up; a no-op
+		// (same fetch returned) for every other provider and when disconnected.
+		this.#fetch = routeIwanFetch(this.#fetch);
 		this.#modelsConfigFile = ModelsConfigFile.relocate(modelsPath ?? path.join(getAgentDir(), "models.yml"));
 		this.#cacheDbPath = modelsPath ? path.join(path.dirname(modelsPath), "models.db") : undefined;
 		// Set up fallback resolver for custom provider API keys
@@ -1551,6 +1556,12 @@ export class ModelRegistry {
 	}
 	#applyHardcodedModelPolicies(models: Model<Api>[]): Model<Api>[] {
 		return models.map(model => {
+			// USTC's /models endpoint only returns ids. Repair both freshly
+			// discovered entries and pre-fix SQLite cache rows immediately, instead
+			// of leaving the effort selector hidden until the 24-hour cache expires.
+			if (model.provider === "ustc" && !model.reasoning && isUstcReasoningModelId(model.id)) {
+				model = applyModelOverride(model, { reasoning: true });
+			}
 			if (model.provider === "ollama-cloud" && model.omitMaxOutputTokens !== true) {
 				model = applyModelOverride(model, { omitMaxOutputTokens: true });
 			}

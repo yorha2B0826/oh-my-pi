@@ -77,6 +77,26 @@ export declare class FileLock {
   release(): void
 }
 
+/** A single active iWAN tunnel draining through a local SOCKS5 proxy. */
+export declare class IwanTunnel {
+  /**
+   * Create an idle tunnel handle. Call [`IwanTunnel::connect`] to establish
+   * a tunnel once the TS login flow has recovered a server password.
+   */
+  constructor()
+  /**
+   * Authenticate to a server and start draining its tunnel through a local
+   * SOCKS5 proxy. `password` is the already-decrypted server password
+   * (the TS layer has recovered it from the controller's server list via
+   * [`pi_iwan::protocol::decrypt_server_password`]).
+   */
+  connect(host: string, port: number, username: string, password: string): Promise<IwanStatus>
+  /** Snapshot the current tunnel: the bound SOCKS5 address and flow count. */
+  status(): Promise<IwanStatus>
+  /** Stop the tunnel, closing the SOCKS5 listener and the UDP socket. */
+  stop(): Promise<void>
+}
+
 /** WebRTC peer that accepts 16 kHz mono PCM and renders remote Opus audio. */
 export declare class LiveWebRtcPeer {
   /**
@@ -1308,6 +1328,16 @@ export declare function isoStart(kind: IsoBackendKind | undefined | null, lower:
 
 /** Tear down a previously started backend at `merged`. */
 export declare function isoStop(kind: IsoBackendKind | undefined | null, merged: string): Promise<void>
+
+/** Status of a running tunnel, mirrored from [`pi_iwan::socks::SocksStatus`]. */
+export interface IwanStatus {
+  /** Bound local SOCKS5 address (`127.0.0.1:port`). */
+  address: string
+  /** SOCKS5 listener port. */
+  port: number
+  /** Number of inner TCP connections currently multiplexed. */
+  flows: number
+}
 
 /** Event types from Kitty keyboard protocol (flag 2). */
 export declare enum KeyEventType {

@@ -57,6 +57,7 @@ import { loadExtensions } from "./extensibility/extensions/loader";
 import { ExtensionRunner } from "./extensibility/extensions/runner";
 import type { ExtensionUIContext } from "./extensibility/extensions/types";
 import { scheduleMarketplaceAutoUpdate } from "./extensibility/plugins/marketplace-auto-update";
+import { autoConnectIwanOnStartup } from "./iwan/service";
 import { registerDaemonProjectPresence } from "./launch/presence";
 import type { MCPManager } from "./mcp";
 import { InteractiveMode } from "./modes/interactive-mode";
@@ -1299,6 +1300,9 @@ export async function runRootCommand(
 		process.stderr.write(`${chalk.red(`Error: ${message}`)}\n`);
 		process.exit(1);
 	}
+	// Restore a saved interactive iWAN session before constructing the model
+	// registry, so USTC model discovery is routed from its first network request.
+	if (isInteractive) await autoConnectIwanOnStartup();
 	const modelRegistry = logger.time("modelRegistry:init", () => new ModelRegistry(authStorage));
 
 	const settingsInstance =

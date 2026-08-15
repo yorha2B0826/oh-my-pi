@@ -20,6 +20,7 @@ export const AudioCapture = nativeBindings.AudioCapture;
 export const AudioPlayback = nativeBindings.AudioPlayback;
 export const DesktopSession = nativeBindings.DesktopSession;
 export const FileLock = nativeBindings.FileLock;
+export const IwanTunnel = nativeBindings.IwanTunnel;
 export const LiveWebRtcPeer = nativeBindings.LiveWebRtcPeer;
 export const MacAppearanceObserver = nativeBindings.MacAppearanceObserver;
 export const MacOSPowerAssertion = nativeBindings.MacOSPowerAssertion;
