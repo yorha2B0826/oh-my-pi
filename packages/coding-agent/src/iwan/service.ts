@@ -90,6 +90,8 @@ class IwanManager {
 	/** Set by the long-lived interactive process to auto-reconnect on tunnel death. */
 	#autoReconnect = false;
 	#reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+	#nextTunnelGeneration = 0;
+	#activeTunnelGeneration: number | undefined;
 
 	async init(): Promise<void> {
 		this.#initPromise ??= this.#loadConfig();
@@ -103,6 +105,11 @@ class IwanManager {
 	 */
 	enableAutoReconnect(): void {
 		this.#autoReconnect = true;
+	}
+
+	scheduleAutoReconnect(): void {
+		if (!this.#autoReconnect || this.#tunnel || this.#config?.selected === undefined) return;
+		this.#scheduleReconnect();
 	}
 
 	status(): IwanStatus {
@@ -187,12 +194,19 @@ class IwanManager {
 
 		this.#state = "connecting";
 		this.#errorMessage = undefined;
+		let tunnel: IwanTunnel | undefined;
+		let generation = 0;
 		try {
 			await this.#stopTunnel();
 			const password = decryptServerPassword(server);
-			const tunnel = new IwanTunnel(message => this.#handleTunnelClosed(message));
-			const status = await tunnel.connect(server.host, server.port, server.username, password);
+			generation = ++this.#nextTunnelGeneration;
+			tunnel = new IwanTunnel(message => this.#handleTunnelClosed(generation, message));
 			this.#tunnel = tunnel;
+			this.#activeTunnelGeneration = generation;
+			const status = await tunnel.connect(server.host, server.port, server.username, password);
+			if (this.#tunnel !== tunnel || this.#activeTunnelGeneration !== generation) {
+				throw new Error(this.#errorMessage ?? "iWAN tunnel closed while connecting");
+			}
 			this.#socksPort = status.port;
 			this.#flows = status.flows;
 			setIwanRoutePort(status.port);
@@ -201,7 +215,11 @@ class IwanManager {
 			this.#state = "connected";
 			return this.status();
 		} catch (cause) {
-			await this.#stopTunnel().catch(() => {});
+			// A native close callback may already have cleared this generation and
+			// scheduled its reconnect. Do not cancel that newer recovery timer.
+			if (tunnel && this.#tunnel === tunnel && this.#activeTunnelGeneration === generation) {
+				await this.#stopTunnel().catch(() => {});
+			}
 			this.#state = "error";
 			this.#errorMessage = cause instanceof Error ? cause.message : String(cause);
 			throw cause;
@@ -213,17 +231,24 @@ class IwanManager {
 	 * server `Close`). Clear the dead route so future requests fail fast instead
 	 * of hanging, then — in the long-lived interactive process — reconnect.
 	 */
-	#handleTunnelClosed(message: string): void {
-		// Ignore a stale tunnel's death: only the current one matters.
-		if (!this.#tunnel) return;
+	#handleTunnelClosed(generation: number, message: string): void {
+		// Native callbacks cross a thread boundary and can arrive after a newer
+		// tunnel has replaced the failed one. Only the active generation may clear
+		// routing or start reconnect recovery.
+		if (!this.#tunnel || generation !== this.#activeTunnelGeneration) return;
+		const tunnel = this.#tunnel;
 		this.#errorMessage = message;
 		this.#state = "error";
 		// The native tunnel already tore itself down; drop the dead handle and
 		// route so no request keeps targeting a dead SOCKS port.
 		this.#tunnel = undefined;
+		this.#activeTunnelGeneration = undefined;
 		this.#socksPort = undefined;
 		this.#flows = 0;
 		setIwanRoutePort(undefined);
+		// The native failure path normally closes flows itself; stop remains a
+		// best-effort backstop for older native builds and partially failed tasks.
+		void tunnel.stop().catch(() => {});
 		if (!this.#autoReconnect) return;
 		this.#scheduleReconnect();
 	}
@@ -271,13 +296,13 @@ class IwanManager {
 
 	async #stopTunnel(): Promise<void> {
 		this.#cancelReconnect();
-		if (this.#tunnel) {
-			await this.#tunnel.stop();
-			this.#tunnel = undefined;
-			this.#socksPort = undefined;
-			this.#flows = 0;
-			setIwanRoutePort(undefined);
-		}
+		const tunnel = this.#tunnel;
+		this.#tunnel = undefined;
+		this.#activeTunnelGeneration = undefined;
+		this.#socksPort = undefined;
+		this.#flows = 0;
+		setIwanRoutePort(undefined);
+		if (tunnel) await tunnel.stop();
 	}
 }
 
@@ -430,6 +455,8 @@ export async function autoConnectIwanOnStartup(): Promise<void> {
 		if (selected === undefined) return;
 		await iwanManager.connect(selected);
 	} catch {
-		// Fire-and-forget: a failed reconnect must not fail interactive startup.
+		// A cold-start outage should recover without requiring a later manual
+		// `/iwan connect`, while still never failing interactive startup.
+		iwanManager.scheduleAutoReconnect();
 	}
 }

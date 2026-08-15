@@ -16,6 +16,7 @@
  */
 
 import { Duplex } from "node:stream";
+import { ProviderResponseError } from "../error/provider";
 import type { FetchImpl } from "../types";
 
 /** Host that the iWAN tunnel serves; everything else bypasses the tunnel. */
@@ -162,11 +163,11 @@ function readHttpResponse(socket: Duplex, request: Buffer, signal?: AbortSignal)
 			else emitBody(initialBody);
 		};
 		const onEnd = () => {
-			if (!responseStarted) fail(new Error("iWAN gateway closed before sending an HTTP response"));
-			else if (decoder && !decoder.done) fail(new Error("iWAN gateway closed during a chunked response"));
+			if (!responseStarted) fail(iwanTransportError("iWAN gateway closed before sending an HTTP response"));
+			else if (decoder && !decoder.done) fail(iwanTransportError("iWAN gateway closed during a chunked response"));
 			else finish();
 		};
-		const onError = (error: Error) => fail(error);
+		const onError = (error: Error) => fail(iwanTransportCause(error, "iWAN gateway connection failed"));
 
 		if (signal?.aborted) return onAbort();
 		signal?.addEventListener("abort", onAbort, { once: true });
@@ -204,6 +205,20 @@ class ChunkedDecoder {
 		this.#buffer = Buffer.concat([this.#buffer, data]);
 		const output: Buffer[] = [];
 		while (true) {
+			// A zero-sized chunk is followed by either a final CRLF or trailers.
+			// Keep this as a distinct persistent state: the terminator may be split
+			// across arbitrary socket data events.
+			if (this.#remaining === 0) {
+				if (this.#buffer.length < 2) break;
+				if (this.#buffer.subarray(0, 2).toString("ascii") === "\r\n") {
+					this.done = true;
+					break;
+				}
+				const trailerEnd = this.#buffer.indexOf("\r\n\r\n");
+				if (trailerEnd < 0) break;
+				this.done = true;
+				break;
+			}
 			if (this.#remaining === undefined) {
 				const lineEnd = this.#buffer.indexOf("\r\n");
 				if (lineEnd < 0) break;
@@ -211,15 +226,7 @@ class ChunkedDecoder {
 				if (!/^[0-9a-f]+$/i.test(sizeText)) throw new Error("iWAN gateway returned an invalid chunk size");
 				this.#remaining = Number.parseInt(sizeText, 16);
 				this.#buffer = this.#buffer.subarray(lineEnd + 2);
-				if (this.#remaining === 0) {
-					if (this.#buffer.length < 2) break;
-					if (this.#buffer.subarray(0, 2).toString("ascii") !== "\r\n") {
-						const trailerEnd = this.#buffer.indexOf("\r\n\r\n");
-						if (trailerEnd < 0) break;
-					}
-					this.done = true;
-					break;
-				}
+				if (this.#remaining === 0) continue;
 			}
 			if (this.#remaining === undefined || this.#buffer.length < this.#remaining + 2) break;
 			const chunk = this.#buffer.subarray(0, this.#remaining);
@@ -307,8 +314,8 @@ function openSocks5Tunnel(
 				// Reply: VER(0x05) METHOD. We offered no-auth (0x00) first.
 				if (buffer.length < 2) return;
 				if (buffer[0] !== 0x05 || buffer[1] !== 0x00) {
-					socket.terminate();
 					fail(new Error("iWAN SOCKS5 negotiation failed"));
+					socket.terminate();
 					return;
 				}
 				buffer = Buffer.alloc(0);
@@ -317,19 +324,19 @@ function openSocks5Tunnel(
 			} else if (stage === "connect") {
 				if (buffer.length < 4) return;
 				if (buffer[0] !== 0x05) {
+					fail(iwanTransportError("iWAN SOCKS5 CONNECT failed"));
 					socket.terminate();
-					fail(new Error("iWAN SOCKS5 CONNECT failed"));
 					return;
 				}
 				if (buffer[1] !== 0x00) {
+					fail(iwanTransportError(`iWAN SOCKS5 CONNECT failed (reply ${buffer[1]})`));
 					socket.terminate();
-					fail(new Error(`iWAN SOCKS5 CONNECT failed (reply ${buffer[1]})`));
 					return;
 				}
 				const addressType = buffer[3];
 				if (addressType !== 0x01 && addressType !== 0x03 && addressType !== 0x04) {
-					socket.terminate();
 					fail(new Error("iWAN SOCKS5 CONNECT returned an invalid address type"));
+					socket.terminate();
 					return;
 				}
 				const addressLength = addressType === 0x01 ? 4 : addressType === 0x03 ? 1 + (buffer[4] ?? 0) : 16;
@@ -356,7 +363,7 @@ function openSocks5Tunnel(
 							duplex?.push(null);
 						},
 						error(_tlsSocket, error) {
-							fail(error);
+							fail(iwanTransportCause(error, "iWAN TLS connection failed"));
 						},
 					},
 				});
@@ -399,19 +406,28 @@ function openSocks5Tunnel(
 				close() {
 					// Closing the raw socket is part of Bun's normal TLS handoff.
 					if (tlsUpgradeStarted) return;
-					if (!settled) fail(new Error("iWAN SOCKS5 connection closed"));
+					if (!settled) fail(iwanTransportError("iWAN SOCKS5 connection closed"));
 					else duplex?.push(null);
 				},
 				error(_socket, error) {
 					if (tlsUpgradeStarted) return;
-					fail(error);
+					fail(iwanTransportCause(error, "iWAN SOCKS5 connection failed"));
 				},
 				connectError(_socket, error) {
-					fail(error);
+					fail(iwanTransportCause(error, "iWAN SOCKS5 connection failed"));
 				},
 			},
-		}).catch(fail);
+		}).catch(error => fail(iwanTransportCause(error, "iWAN SOCKS5 connection failed")));
 	});
+}
+
+function iwanTransportError(message: string, cause?: unknown): ProviderResponseError {
+	return new ProviderResponseError(message, { provider: "ustc", kind: "incomplete-stream", cause });
+}
+
+function iwanTransportCause(error: unknown, fallback: string): ProviderResponseError {
+	if (error instanceof ProviderResponseError) return error;
+	return iwanTransportError(error instanceof Error ? error.message : fallback, error);
 }
 
 function bunSocketDuplex(socket: Bun.Socket<undefined>): Duplex {

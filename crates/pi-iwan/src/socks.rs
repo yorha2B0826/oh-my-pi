@@ -50,10 +50,14 @@ const RETRANSMIT_AFTER: Duration = Duration::from_millis(1000);
 const MAX_RETRIES: u32 = 5;
 /// Idle keepalive cadence for the tunnel.
 const KEEPALIVE_AFTER: Duration = Duration::from_millis(10_000);
+/// Declare the tunnel dead after three unanswered keepalive intervals.
+const TUNNEL_DEAD_AFTER: Duration = Duration::from_secs(30);
 /// Timeout for the SYN/SYN-ACK handshake.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
-/// Idle timeout for an established flow (4 × connect timeout).
-const IDLE_TIMEOUT: Duration = Duration::from_millis(120_000);
+/// Idle timeout for an established flow. Keep it above the AI stream watchdog
+/// so a model that pauses between SSE events is handled by provider recovery,
+/// not prematurely severed inside the tunnel.
+const IDLE_TIMEOUT: Duration = Duration::from_secs(360);
 /// First local (in-tunnel) port handed out to flows.
 const LOCAL_PORT_START: u16 = 49152;
 /// Local task tick cadence (retransmit / keepalive / timeouts).
@@ -108,6 +112,7 @@ struct Shared {
 	by_port:   HashMap<u16, u64>,
 	next_id:   u64,
 	next_port: u16,
+	last_rx:   Instant,
 }
 
 /// Public status snapshot, mirrored to the napi layer.
@@ -132,7 +137,8 @@ pub struct Socks {
 	shared:   Arc<Mutex<Shared>>,
 	shutdown: Arc<watch::Sender<bool>>,
 	/// Set when the tunnel dies on its own (UDP socket error or a server `Close`
-	/// packet). `None` means still healthy; the string is a human-readable cause.
+	/// packet). `None` means still healthy; the string is a human-readable
+	/// cause.
 	failure:  Arc<watch::Sender<Option<String>>>,
 	tasks:    Vec<tokio::task::JoinHandle<()>>,
 }
@@ -149,6 +155,7 @@ impl Socks {
 			by_port:   HashMap::new(),
 			next_id:   0,
 			next_port: LOCAL_PORT_START,
+			last_rx:   Instant::now(),
 		}));
 		let (shutdown, shutdown_rx) = watch::channel(false);
 		let (failure, _failure_rx) = watch::channel::<Option<String>>(None);
@@ -196,7 +203,7 @@ impl Socks {
 							match received {
 								Ok(n) => receive_vpn(&buf[..n], &shared, &udp, &auth, &xor_key, shutdown.as_ref(), failure.as_ref()).await,
 								Err(err) => {
-									report_failure(shutdown.as_ref(), failure.as_ref(), &format!("iWAN tunnel data plane lost: {err}")).await;
+									report_failure(&shared, shutdown.as_ref(), failure.as_ref(), &format!("iWAN tunnel data plane lost: {err}")).await;
 									break;
 								},
 							}
@@ -211,6 +218,8 @@ impl Socks {
 			let shared = Arc::clone(&shared);
 			let udp = Arc::clone(&udp);
 			let auth = auth.clone();
+			let shutdown = Arc::clone(&shutdown);
+			let failure = Arc::clone(&failure);
 			let mut rx = shutdown_rx.clone();
 			tasks.push(tokio::spawn(async move {
 				let mut ticker = interval(TICK_INTERVAL);
@@ -224,7 +233,7 @@ impl Socks {
 								last_keepalive = now;
 								send_control(&udp, &auth, PacketType::EchoRequest).await;
 							}
-							tick(&shared, &udp, &auth, &xor_key).await;
+							tick(&shared, &udp, &auth, &xor_key, shutdown.as_ref(), failure.as_ref()).await;
 						}
 					}
 				}
@@ -258,8 +267,8 @@ impl Socks {
 		}
 	}
 
-	/// A clone of the tunnel's failure signal. It yields `None` while healthy and
-	/// a `Some(cause)` once the tunnel dies on its own (UDP error or server
+	/// A clone of the tunnel's failure signal. It yields `None` while healthy
+	/// and a `Some(cause)` once the tunnel dies on its own (UDP error or server
 	/// `Close`). A clean `stop()` keeps it at `None`.
 	pub fn failure(&self) -> watch::Receiver<Option<String>> {
 		self.failure.subscribe()
@@ -281,11 +290,35 @@ async fn send_inner(udp: &UdpSocket, auth: &AuthResult, xor_key: &[u8; 8], inner
 	let _ = udp.send(&data_packet(&header, &payload)).await;
 }
 
-/// Record that the tunnel died on its own and broadcast shutdown so the accept
-/// and tick loops unwind. Idempotent: the first cause wins.
-async fn report_failure(shutdown: &watch::Sender<bool>, failure: &watch::Sender<Option<String>>, cause: &str) {
-	let _ = failure.send_replace(Some(cause.to_string()));
+/// Record that the tunnel died on its own, close every local flow, and
+/// broadcast shutdown so the accept/receive/tick loops unwind. Idempotent:
+/// first cause wins.
+async fn report_failure(
+	shared: &Arc<Mutex<Shared>>,
+	shutdown: &watch::Sender<bool>,
+	failure: &watch::Sender<Option<String>>,
+	cause: &str,
+) {
+	let first = failure.send_if_modified(|current| {
+		if current.is_some() {
+			return false;
+		}
+		*current = Some(cause.to_string());
+		true
+	});
+	if !first {
+		return;
+	}
 	let _ = shutdown.send(true);
+	let flows = {
+		let mut sh = shared.lock().await;
+		sh.by_port.clear();
+		sh.flows.drain().map(|(_, flow)| flow).collect::<Vec<_>>()
+	};
+	for flow in flows {
+		let f = flow.lock().await;
+		let _ = f.write.send(None);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -590,14 +623,18 @@ async fn receive_vpn(
 	if sid != auth.sid || token != auth.token {
 		return;
 	}
+	shared.lock().await.last_rx = Instant::now();
 	if packet_type == PacketType::EchoRequest as u8 {
 		send_control(udp, auth, PacketType::EchoResponse).await;
+		return;
+	}
+	if packet_type == PacketType::EchoResponse as u8 {
 		return;
 	}
 	if packet_type == PacketType::Close as u8 {
 		// Tunnel closed by the server: surface it as a failure so the host can
 		// reconnect rather than quietly keeping a dead SOCKS listener around.
-		report_failure(shutdown, failure, "iWAN server closed the tunnel").await;
+		report_failure(shared, shutdown, failure, "iWAN server closed the tunnel").await;
 		return;
 	}
 	if packet_type != PacketType::Data as u8 && packet_type != PacketType::DataEncrypted as u8 {
@@ -861,7 +898,15 @@ async fn tick(
 	udp: &Arc<UdpSocket>,
 	auth: &AuthResult,
 	xor_key: &[u8; 8],
+	shutdown: &watch::Sender<bool>,
+	failure: &watch::Sender<Option<String>>,
 ) {
+	let now = Instant::now();
+	let last_rx = shared.lock().await.last_rx;
+	if now.duration_since(last_rx) >= TUNNEL_DEAD_AFTER {
+		report_failure(shared, shutdown, failure, "iWAN tunnel heartbeat timed out").await;
+		return;
+	}
 	let snapshot = {
 		let sh = shared.lock().await;
 		sh.flows.values().cloned().collect::<Vec<_>>()
@@ -1067,6 +1112,7 @@ mod tests {
 			by_port:   HashMap::new(),
 			next_id:   0,
 			next_port: LOCAL_PORT_START,
+			last_rx:   Instant::now(),
 		};
 		let first = allocate_port(&mut sh).expect("free port");
 		assert_eq!(first, LOCAL_PORT_START);
@@ -1074,5 +1120,46 @@ mod tests {
 		sh.by_port.insert(first, 0);
 		let second = allocate_port(&mut sh).expect("free port");
 		assert_eq!(second, LOCAL_PORT_START + 1);
+	}
+
+	#[tokio::test]
+	async fn tunnel_failure_closes_flows_and_preserves_first_cause() {
+		let (write, mut writes) = mpsc::unbounded_channel();
+		let flow = Arc::new(Mutex::new(Flow {
+			write,
+			state: FlowState::Established,
+			input: Vec::new(),
+			local_port: LOCAL_PORT_START,
+			remote_ip: Some(Ipv4Addr::LOCALHOST),
+			remote_port: Some(443),
+			send_sequence: 0,
+			receive_sequence: 0,
+			remote_window: 65535,
+			remote_window_scale: 0,
+			pending: Vec::new(),
+			last_activity: Instant::now(),
+			local_fin: false,
+			remote_fin: false,
+			resolving: false,
+		}));
+		let shared = Arc::new(Mutex::new(Shared {
+			flows:     HashMap::from([(0, flow)]),
+			by_port:   HashMap::from([(LOCAL_PORT_START, 0)]),
+			next_id:   1,
+			next_port: LOCAL_PORT_START + 1,
+			last_rx:   Instant::now(),
+		}));
+		let (shutdown, shutdown_rx) = watch::channel(false);
+		let (failure, failure_rx) = watch::channel(None);
+
+		report_failure(&shared, &shutdown, &failure, "first failure").await;
+		report_failure(&shared, &shutdown, &failure, "later failure").await;
+
+		assert_eq!(failure_rx.borrow().as_deref(), Some("first failure"));
+		assert!(*shutdown_rx.borrow());
+		assert!(matches!(writes.recv().await, Some(None)));
+		let sh = shared.lock().await;
+		assert!(sh.flows.is_empty());
+		assert!(sh.by_port.is_empty());
 	}
 }

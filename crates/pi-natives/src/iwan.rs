@@ -9,9 +9,13 @@
 //!
 //! See [`pi_iwan::tunnel::authenticate`] and [`pi_iwan::socks::Socks`].
 
-use std::{net::{SocketAddr, ToSocketAddrs}, sync::Arc};
+use std::{
+	net::{SocketAddr, ToSocketAddrs},
+	sync::Arc,
+};
 
 use napi::{
+	Status,
 	bindgen_prelude::Result,
 	threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode, UnknownReturnValue},
 };
@@ -19,7 +23,7 @@ use napi_derive::napi;
 use pi_iwan::{socks::Socks, tunnel::authenticate};
 
 /// A JS-facing `(message: string) => void` callback for tunnel-death events.
-type ClosedCallback = ThreadsafeFunction<String, UnknownReturnValue>;
+type ClosedCallback = ThreadsafeFunction<String, UnknownReturnValue, String, Status, true, true>;
 
 /// Status of a running tunnel, mirrored from [`pi_iwan::socks::SocksStatus`].
 #[napi(object)]
@@ -89,7 +93,9 @@ impl IwanTunnel {
 			let mut failure = socks.failure();
 			tokio::spawn(async move {
 				loop {
-					let Ok(()) = failure.changed().await else { break };
+					let Ok(()) = failure.changed().await else {
+						break;
+					};
 					let cause = failure.borrow().clone();
 					let Some(cause) = cause else { continue };
 					callback.call(Ok(cause), ThreadsafeFunctionCallMode::NonBlocking);
