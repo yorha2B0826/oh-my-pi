@@ -25,10 +25,13 @@ jobs:
          fail-fast: false
          matrix:
             include:
+               # NB: darwin-x64 (Intel macOS) is intentionally omitted — GitHub
+               # retired the macos-13 Intel runner, and cross-compiling the Rust
+               # pi_natives addon for x86_64-apple-darwin on arm64 is not worth
+               # it for the Intel-Mac tail. The tap formula omits its on_intel
+               # block accordingly.
                - target_id: darwin-arm64
                  runner: macos-14
-               - target_id: darwin-x64
-                 runner: macos-13
                - target_id: linux-x64
                  runner: ubuntu-22.04
                - target_id: linux-arm64
