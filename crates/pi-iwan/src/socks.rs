@@ -130,7 +130,10 @@ pub enum SocksError {
 pub struct Socks {
 	local:    SocketAddr,
 	shared:   Arc<Mutex<Shared>>,
-	shutdown: watch::Sender<bool>,
+	shutdown: Arc<watch::Sender<bool>>,
+	/// Set when the tunnel dies on its own (UDP socket error or a server `Close`
+	/// packet). `None` means still healthy; the string is a human-readable cause.
+	failure:  Arc<watch::Sender<Option<String>>>,
 	tasks:    Vec<tokio::task::JoinHandle<()>>,
 }
 
@@ -148,6 +151,11 @@ impl Socks {
 			next_port: LOCAL_PORT_START,
 		}));
 		let (shutdown, shutdown_rx) = watch::channel(false);
+		let (failure, _failure_rx) = watch::channel::<Option<String>>(None);
+		// `failure` is also driven by the tasks themselves (UDP socket errors and
+		// server `Close`), so wrap both senders in `Arc` for shared ownership.
+		let shutdown = Arc::new(shutdown);
+		let failure = Arc::new(failure);
 		let mut tasks = Vec::new();
 
 		// Accept loop.
@@ -169,11 +177,15 @@ impl Socks {
 			}));
 		}
 
-		// UDP receive loop.
+		// UDP receive loop: this is the tunnel's heartbeat. A socket error here
+		// means the data plane is dead (NAT expiry, server restart, …) — surface
+		// it instead of silently `break`-ing and leaving a zombie SOCKS listener.
 		{
 			let shared = Arc::clone(&shared);
 			let udp = Arc::clone(&udp);
 			let auth = auth.clone();
+			let shutdown = Arc::clone(&shutdown);
+			let failure = Arc::clone(&failure);
 			let mut rx = shutdown_rx.clone();
 			tasks.push(tokio::spawn(async move {
 				let mut buf = vec![0u8; 65536];
@@ -181,8 +193,13 @@ impl Socks {
 					tokio::select! {
 						_ = rx.changed() => break,
 						received = udp.recv(&mut buf) => {
-							let Ok(n) = received else { break };
-							receive_vpn(&buf[..n], &shared, &udp, &auth, &xor_key).await;
+							match received {
+								Ok(n) => receive_vpn(&buf[..n], &shared, &udp, &auth, &xor_key, shutdown.as_ref(), failure.as_ref()).await,
+								Err(err) => {
+									report_failure(shutdown.as_ref(), failure.as_ref(), &format!("iWAN tunnel data plane lost: {err}")).await;
+									break;
+								},
+							}
 						}
 					}
 				}
@@ -216,7 +233,7 @@ impl Socks {
 
 		drop(shutdown_rx);
 
-		Ok(Self { local, shared, shutdown, tasks })
+		Ok(Self { local, shared, shutdown, failure, tasks })
 	}
 
 	/// The bound `127.0.0.1:port` of the SOCKS5 listener.
@@ -240,6 +257,13 @@ impl Socks {
 			let _ = f.write.send(None);
 		}
 	}
+
+	/// A clone of the tunnel's failure signal. It yields `None` while healthy and
+	/// a `Some(cause)` once the tunnel dies on its own (UDP error or server
+	/// `Close`). A clean `stop()` keeps it at `None`.
+	pub fn failure(&self) -> watch::Receiver<Option<String>> {
+		self.failure.subscribe()
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -255,6 +279,13 @@ async fn send_inner(udp: &UdpSocket, auth: &AuthResult, xor_key: &[u8; 8], inner
 	let payload = xor(inner, xor_key);
 	let header = packet_header(PacketType::DataEncrypted, ENCRYPTION, auth.sid, auth.token);
 	let _ = udp.send(&data_packet(&header, &payload)).await;
+}
+
+/// Record that the tunnel died on its own and broadcast shutdown so the accept
+/// and tick loops unwind. Idempotent: the first cause wins.
+async fn report_failure(shutdown: &watch::Sender<bool>, failure: &watch::Sender<Option<String>>, cause: &str) {
+	let _ = failure.send_replace(Some(cause.to_string()));
+	let _ = shutdown.send(true);
 }
 
 // ---------------------------------------------------------------------------
@@ -547,6 +578,8 @@ async fn receive_vpn(
 	udp: &Arc<UdpSocket>,
 	auth: &AuthResult,
 	xor_key: &[u8; 8],
+	shutdown: &watch::Sender<bool>,
+	failure: &watch::Sender<Option<String>>,
 ) {
 	if packet.len() < 8 {
 		return;
@@ -562,7 +595,9 @@ async fn receive_vpn(
 		return;
 	}
 	if packet_type == PacketType::Close as u8 {
-		// Tunnel closed by the server: tear everything down via shutdown.
+		// Tunnel closed by the server: surface it as a failure so the host can
+		// reconnect rather than quietly keeping a dead SOCKS listener around.
+		report_failure(shutdown, failure, "iWAN server closed the tunnel").await;
 		return;
 	}
 	if packet_type != PacketType::Data as u8 && packet_type != PacketType::DataEncrypted as u8 {

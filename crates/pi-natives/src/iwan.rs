@@ -9,11 +9,17 @@
 //!
 //! See [`pi_iwan::tunnel::authenticate`] and [`pi_iwan::socks::Socks`].
 
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::{net::{SocketAddr, ToSocketAddrs}, sync::Arc};
 
-use napi::bindgen_prelude::Result;
+use napi::{
+	bindgen_prelude::Result,
+	threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode, UnknownReturnValue},
+};
 use napi_derive::napi;
 use pi_iwan::{socks::Socks, tunnel::authenticate};
+
+/// A JS-facing `(message: string) => void` callback for tunnel-death events.
+type ClosedCallback = ThreadsafeFunction<String, UnknownReturnValue>;
 
 /// Status of a running tunnel, mirrored from [`pi_iwan::socks::SocksStatus`].
 #[napi(object)]
@@ -29,16 +35,25 @@ pub struct IwanStatus {
 /// A single active iWAN tunnel draining through a local SOCKS5 proxy.
 #[napi]
 pub struct IwanTunnel {
-	socks: tokio::sync::Mutex<Option<Socks>>,
+	socks:     tokio::sync::Mutex<Option<Socks>>,
+	/// `Arc`-shared so `connect()` (called once per reconnect) can hand a clone
+	/// to each watch task without consuming the callback.
+	on_closed: Option<Arc<ClosedCallback>>,
 }
 
 #[napi]
 impl IwanTunnel {
 	/// Create an idle tunnel handle. Call [`IwanTunnel::connect`] to establish
 	/// a tunnel once the TS login flow has recovered a server password.
+	///
+	/// `on_closed` fires once per connection, non-blocking, when the tunnel dies
+	/// on its own — a UDP socket error or the server sending a `Close` packet. A
+	/// clean `stop()` does not fire it.
 	#[napi(constructor)]
-	pub fn new() -> Result<Self> {
-		Ok(Self { socks: tokio::sync::Mutex::new(None) })
+	pub fn new(
+		#[napi(ts_arg_type = "(message: string) => void")] on_closed: Option<ClosedCallback>,
+	) -> Result<Self> {
+		Ok(Self { socks: tokio::sync::Mutex::new(None), on_closed: on_closed.map(Arc::new) })
 	}
 
 	/// Authenticate to a server and start draining its tunnel through a local
@@ -65,6 +80,24 @@ impl IwanTunnel {
 			.await
 			.map_err(|err| napi::Error::from_reason(format!("iWAN socks: {err}")))?;
 		let status = socks.status().await;
+
+		// Watch for the tunnel dying on its own and relay the cause to JS so the
+		// host can stop using the dead port and (optionally) reconnect. The task
+		// leaks no resources: it exits when the `Socks` sender is dropped (on
+		// `stop()` or replacement) or after the first non-`None` failure.
+		if let Some(callback) = self.on_closed.as_ref().map(Arc::clone) {
+			let mut failure = socks.failure();
+			tokio::spawn(async move {
+				loop {
+					let Ok(()) = failure.changed().await else { break };
+					let cause = failure.borrow().clone();
+					let Some(cause) = cause else { continue };
+					callback.call(Ok(cause), ThreadsafeFunctionCallMode::NonBlocking);
+					break;
+				}
+			});
+		}
+
 		*self.socks.lock().await = Some(socks);
 
 		Ok(IwanStatus {
@@ -102,7 +135,7 @@ impl IwanTunnel {
 
 impl Default for IwanTunnel {
 	fn default() -> Self {
-		Self { socks: tokio::sync::Mutex::new(None) }
+		Self { socks: tokio::sync::Mutex::new(None), on_closed: None }
 	}
 }
 

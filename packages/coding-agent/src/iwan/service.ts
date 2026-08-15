@@ -83,13 +83,26 @@ class IwanManager {
 	#pending: PendingLogin | undefined;
 	#tunnel: IwanTunnel | undefined;
 	#socksPort: number | undefined;
+	#flows = 0;
 	#state: IwanState = "disconnected";
 	#errorMessage: string | undefined;
 	#initPromise: Promise<void> | undefined;
+	/** Set by the long-lived interactive process to auto-reconnect on tunnel death. */
+	#autoReconnect = false;
+	#reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 
 	async init(): Promise<void> {
 		this.#initPromise ??= this.#loadConfig();
 		await this.#initPromise;
+	}
+
+	/**
+	 * Enable automatic reconnect in the long-lived interactive process: when the
+	 * tunnel dies on its own, `#handleTunnelClosed` schedules a fresh connect.
+	 * Short-lived `omp iwan …` per-command processes leave this off.
+	 */
+	enableAutoReconnect(): void {
+		this.#autoReconnect = true;
 	}
 
 	status(): IwanStatus {
@@ -103,7 +116,7 @@ class IwanManager {
 				this.#config?.servers?.length && this.#config.selected !== undefined
 					? publicServer(this.#config.servers[this.#config.selected])
 					: undefined,
-			proxy: current ? { address: "127.0.0.1", port: this.#socksPort ?? 0, flows: 0 } : undefined,
+			proxy: current ? { address: "127.0.0.1", port: this.#socksPort ?? 0, flows: this.#flows } : undefined,
 			loginURL: this.#pending?.url,
 			error: this.#errorMessage,
 		};
@@ -177,10 +190,11 @@ class IwanManager {
 		try {
 			await this.#stopTunnel();
 			const password = decryptServerPassword(server);
-			const tunnel = new IwanTunnel();
+			const tunnel = new IwanTunnel(message => this.#handleTunnelClosed(message));
 			const status = await tunnel.connect(server.host, server.port, server.username, password);
 			this.#tunnel = tunnel;
 			this.#socksPort = status.port;
+			this.#flows = status.flows;
 			setIwanRoutePort(status.port);
 			this.#config = { ...current, selected: index };
 			await writeConfig(this.#config);
@@ -194,7 +208,45 @@ class IwanManager {
 		}
 	}
 
+	/**
+	 * Respond to the native tunnel reporting it died on its own (UDP error or a
+	 * server `Close`). Clear the dead route so future requests fail fast instead
+	 * of hanging, then — in the long-lived interactive process — reconnect.
+	 */
+	#handleTunnelClosed(message: string): void {
+		// Ignore a stale tunnel's death: only the current one matters.
+		if (!this.#tunnel) return;
+		this.#errorMessage = message;
+		this.#state = "error";
+		// The native tunnel already tore itself down; drop the dead handle and
+		// route so no request keeps targeting a dead SOCKS port.
+		this.#tunnel = undefined;
+		this.#socksPort = undefined;
+		this.#flows = 0;
+		setIwanRoutePort(undefined);
+		if (!this.#autoReconnect) return;
+		this.#scheduleReconnect();
+	}
+
+	/** Backoff reconnect, best-effort, until a fresh tunnel is up or stopped. */
+	#scheduleReconnect(delayMs = 1_000): void {
+		if (this.#reconnectTimer) return;
+		const selected = this.#config?.selected;
+		this.#reconnectTimer = setTimeout(() => {
+			this.#reconnectTimer = undefined;
+			if (selected === undefined || this.#tunnel) return;
+			this.connect(selected)
+				.then(() => {
+					// Success: reset backoff (next death starts at 1s again).
+				})
+				.catch(() => {
+					this.#scheduleReconnect(Math.min(delayMs * 2, 30_000));
+				});
+		}, delayMs);
+	}
+
 	async stop(): Promise<IwanStatus> {
+		this.#cancelReconnect();
 		await this.#stopTunnel();
 		this.#pending = undefined;
 		this.#state = this.#config?.servers?.length ? "servers" : "disconnected";
@@ -210,11 +262,20 @@ class IwanManager {
 		else if (this.#pending) this.#state = "login";
 	}
 
+	#cancelReconnect(): void {
+		if (this.#reconnectTimer) {
+			clearTimeout(this.#reconnectTimer);
+			this.#reconnectTimer = undefined;
+		}
+	}
+
 	async #stopTunnel(): Promise<void> {
+		this.#cancelReconnect();
 		if (this.#tunnel) {
 			await this.#tunnel.stop();
 			this.#tunnel = undefined;
 			this.#socksPort = undefined;
+			this.#flows = 0;
 			setIwanRoutePort(undefined);
 		}
 	}
@@ -363,6 +424,7 @@ export const iwanManager = new IwanManager();
  */
 export async function autoConnectIwanOnStartup(): Promise<void> {
 	try {
+		iwanManager.enableAutoReconnect();
 		await iwanManager.init();
 		const selected = iwanManager.status().selected;
 		if (selected === undefined) return;

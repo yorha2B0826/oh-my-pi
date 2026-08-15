@@ -82,8 +82,12 @@ export declare class IwanTunnel {
   /**
    * Create an idle tunnel handle. Call [`IwanTunnel::connect`] to establish
    * a tunnel once the TS login flow has recovered a server password.
+   *
+   * `on_closed` fires once per connection, non-blocking, when the tunnel dies
+   * on its own — a UDP socket error or the server sending a `Close` packet. A
+   * clean `stop()` does not fire it.
    */
-  constructor()
+  constructor(onClosed?: (message: string) => void)
   /**
    * Authenticate to a server and start draining its tunnel through a local
    * SOCKS5 proxy. `password` is the already-decrypted server password
