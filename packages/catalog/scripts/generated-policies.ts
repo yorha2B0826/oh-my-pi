@@ -434,7 +434,7 @@ function applyGeneratedModelPolicy(model: ModelSpec<Api>): void {
 		};
 	}
 	if (
-		model.api === "openai-completions" &&
+		(model.api === "openai-completions" || model.api === "openai-responses") &&
 		model.provider === "opencode-go" &&
 		(model.id === "deepseek-v4-flash" || model.id === "deepseek-v4-pro")
 	) {

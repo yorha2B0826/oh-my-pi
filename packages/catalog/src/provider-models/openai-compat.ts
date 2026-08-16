@@ -21,7 +21,17 @@ import {
 import { resolveModelReference } from "../identity/reference";
 import type { ModelManagerOptions } from "../model-manager";
 import { type GeneratedProvider, getBundledModels } from "../models";
-import type { Api, FetchImpl, Model, ModelSpec, OpenAICompat, Provider, ThinkingConfig } from "../types";
+import { OPENAI_GPT_56_CYBER_STANDARD_COST, OPENAI_GPT_56_SOL_STANDARD_COST } from "../openai-pricing";
+import type {
+	Api,
+	FetchImpl,
+	LongContextTokenCost,
+	Model,
+	ModelSpec,
+	OpenAICompat,
+	Provider,
+	ThinkingConfig,
+} from "../types";
 import { discoveryFetch, isAnthropicOAuthToken, isRecord, toBoolean, toNumber, toPositiveNumber } from "../utils";
 import { ALIBABA_TOKEN_PLAN_BASE_URL, parseAlibabaTokenPlanCredential } from "../wire/alibaba-token-plan";
 import { coreWeaveProjectHeaders } from "../wire/coreweave";
@@ -870,6 +880,7 @@ export function umansModelManagerOptions(config?: UmansModelManagerConfig): Mode
 // ---------------------------------------------------------------------------
 
 const OPENAI_API_BASE_URL = "https://api.openai.com/v1";
+/** GPT-5.6 rates applied when a first-party request exceeds 272K input tokens. */
 export const OPENAI_GPT_56_LONG_CONTEXT_COSTS = {
 	luna: {
 		inputThreshold: 272_000,
@@ -892,20 +903,7 @@ export const OPENAI_GPT_56_LONG_CONTEXT_COSTS = {
 		cacheRead: 0.4,
 		cacheWrite: 5,
 	},
-} as const;
-const OPENAI_GPT_56_SOL_STANDARD_COST = {
-	input: 5,
-	output: 30,
-	cacheRead: 0.5,
-	cacheWrite: 6.25,
-	longContext: OPENAI_GPT_56_LONG_CONTEXT_COSTS.sol,
-} as const;
-const OPENAI_GPT_56_CYBER_STANDARD_COST = {
-	input: 12.5,
-	output: 75,
-	cacheRead: 1.25,
-	cacheWrite: 15.625,
-} as const;
+} as const satisfies Readonly<Record<"luna" | "sol" | "terra", LongContextTokenCost>>;
 
 export interface OpenAIModelManagerConfig {
 	apiKey?: string;
@@ -939,7 +937,10 @@ export const OPENAI_DAYBREAK_CURATED_FALLBACK_MODELS: readonly ModelSpec<"openai
 		baseUrl: OPENAI_API_BASE_URL,
 		reasoning: true,
 		input: ["text", "image"],
-		cost: OPENAI_GPT_56_SOL_STANDARD_COST,
+		cost: {
+			...OPENAI_GPT_56_SOL_STANDARD_COST,
+			longContext: OPENAI_GPT_56_LONG_CONTEXT_COSTS.sol,
+		},
 		contextWindow: 1_050_000,
 		maxTokens: 128_000,
 	},
@@ -3785,15 +3786,19 @@ export function basetenModelManagerOptions(
 			const features = Array.isArray(raw.supported_features) ? raw.supported_features : [];
 			const modalities = Array.isArray(raw.input_modalities) ? raw.input_modalities : [];
 
-			// Baseten's reasoning router accepts only the high/max
-			// effort tiers for its GLM-5.2 and gpt-oss routes.
-			const isEffortReasoning =
+			// Baseten's discovery flags are not enough to enable OMP reasoning for every
+			// model. Only models with a verified Baseten reasoning policy are enabled
+			// here; an unknown model may use a different reasoning wire shape or effort
+			// vocabulary, which OMP must not guess.
+			const isSupportedBasetenReasoningModel =
+				isKimiK3ModelId(defaults.id) ||
 				defaults.id === "openai/gpt-oss-120b" ||
+				defaults.id === "deepseek-ai/DeepSeek-V4-Pro" ||
 				defaults.id === "zai-org/GLM-5.2" ||
 				defaults.id === "zai-org/GLM-5.2-Fast";
-			const isBasetenNativeReasoning = isEffortReasoning || defaults.id === "deepseek-ai/DeepSeek-V4-Pro";
 			const reasoning =
-				isBasetenNativeReasoning && (features.includes("reasoning") || features.includes("reasoning_effort"));
+				isSupportedBasetenReasoningModel &&
+				(features.includes("reasoning") || features.includes("reasoning_effort"));
 			const supportsTools = features.includes("tools") ? undefined : false;
 			const vision = modalities.includes("image") || (reference?.input.includes("image") ?? false);
 
@@ -3807,14 +3812,7 @@ export function basetenModelManagerOptions(
 
 			const contextWindow = toPositiveNumber(raw.context_length, reference?.contextWindow ?? defaults.contextWindow);
 			const maxTokens = toPositiveNumber(raw.max_completion_tokens, reference?.maxTokens ?? defaults.maxTokens);
-
 			const baseModel = mapWithBundledReference(entry, defaults, reference);
-			const thinking = isEffortReasoning
-				? {
-						mode: "effort" as const,
-						efforts: [Effort.High, Effort.Max],
-					}
-				: undefined;
 
 			return {
 				...baseModel,
@@ -3823,7 +3821,6 @@ export function basetenModelManagerOptions(
 				cost,
 				contextWindow,
 				maxTokens,
-				...(thinking ? { thinking } : {}),
 				...(supportsTools === false ? { supportsTools } : {}),
 			};
 		},

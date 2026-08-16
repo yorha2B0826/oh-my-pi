@@ -2,28 +2,24 @@
 
 ## [Unreleased]
 
+## [17.3.5] - 2026-08-16
+
 ### Added
 
-- Added support for GLM-5.3 on the z.AI provider. GLM-5.3 introduces a uniform wire-exact `low`/`high`/`max` reasoning-effort ladder on every host (replacing GLM-5.2's host-specific dialects), makes thinking mandatory (`thinking.type` must always be `enabled`; disabling is no longer supported), and defaults to `max` effort. The model is pinned to 1M context and set as the z.AI provider default.
+- Added support for GLM-5.3 on the z.AI provider, featuring a unified low/high/max reasoning-effort ladder across all hosts, mandatory thinking mode, 1M context, and default-model status for the z.AI provider.
+
 ### Changed
 
-- Switched the paid xAI provider (`xai` / `XAI_API_KEY`) from Chat Completions to the OpenAI Responses API (`POST https://api.x.ai/v1/responses`), matching SuperGrok `xai-oauth`. Prompt-cache affinity (`x-grok-conv-id`), reasoning-effort allowlisting, and encrypted-reasoning replay rules are now shared across both first-party xAI hosts.
-- Changed the paid xAI (`XAI_API_KEY`) default model from `grok-4-fast-non-reasoning` to `grok-4.5`.
-- Changed the SuperGrok (`xai-oauth`) default model from `grok-4.3` to `grok-4.5`.
-- Requested `reasoning.encrypted_content` on first-party xAI Responses calls (`xai` and `xai-oauth`) via the `include` parameter.
-- Replayed xAI encrypted reasoning items on later Responses turns instead of stripping `type: "reasoning"` history.
+- Switched the paid xAI provider (xai / XAI_API_KEY) from Chat Completions to the OpenAI Responses API, aligning it with SuperGrok (xai-oauth) for prompt-cache affinity, reasoning-effort handling, and encrypted-reasoning replay.
+- Changed the paid xAI (XAI_API_KEY) default model to grok-4.5.
+- Changed the SuperGrok (xai-oauth) default model to grok-4.5.
+- Improved reasoning continuity for xAI models by requesting and replaying encrypted reasoning content across multi-turn Responses API calls.
 
 ### Fixed
 
-- Invalidated stale paid-xAI model-cache rows written under Chat Completions so the Responses migration takes effect immediately instead of waiting for TTL expiry.
-- Clamped paid xAI Responses `minimal` reasoning effort to `low` (same wire map as SuperGrok) so `xai/grok-4.5` does not 400.
-- Suppressed presence/frequency penalties and stop sequences on xAI reasoning models so a configured `presencePenalty` does not 400 after the `grok-4.5` default change.
-- Stopped emitting stale `thinking.efforts` dials on paid xAI Responses catalog rows that reject `reasoning.effort` (`grok-code-fast-1`, `grok-build-0.1`, `grok-4.20-0309-reasoning`, and other off-allowlist reasoners).
-- Marked first-party xAI Responses hosts (`xai` and `xai-oauth`) as not supporting `reasoning.summary`, so paid `xai/grok-4.5` effort requests omit the unsupported field instead of sending `summary: "auto"`.
-- Removed unsupported `xhigh` (and `max`) thinking tiers from first-party Grok 4.5 / 4.3 / 3-mini Responses rows; leftover `xhigh`/`max` requests clamp to `high`. `grok-4.6*` and `grok-4.20-multi-agent*` advertise unmapped `xhigh`.
-- Stopped baking `reasoningEffortMap` on first-party xAI catalog rows that omit `reasoning.effort` (`omitReasoningEffort: true`).
-- Suppressed presence/frequency penalties on every first-party xAI Responses model, including non-reasoning ids such as `grok-2`; xAI's `/v1/responses` marks those fields unsupported.
-- Routed `grok-4.6` (added on main) through first-party xAI Responses and advertised its documented `xhigh` effort tier (4.5 stays 4-tier).
+- Fixed Codex Daybreak Blue and Red model discovery reporting zero token prices, which incorrectly labeled the models as free in the model picker.
+- Fixed Baseten's moonshotai/Kimi-K3 catalog metadata so its low/high/max thinking levels are available.
+- Fixed opencode-go/deepseek-v4-flash Responses requests sending forced named tool_choice selectors that are rejected while thinking mode is active.
 
 ## [17.3.4] - 2026-08-14
 

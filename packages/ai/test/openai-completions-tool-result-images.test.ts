@@ -228,7 +228,7 @@ describe("openai-completions convertMessages", () => {
 		const assistantMessage: AssistantMessage = {
 			role: "assistant",
 			content: [{ type: "toolCall", id: emptyNormalizingId, name: "read", arguments: { path: "README.md" } }],
-			api: model.api,
+			api: "openai-responses",
 			provider: model.provider,
 			model: model.id,
 			usage: emptyUsage,

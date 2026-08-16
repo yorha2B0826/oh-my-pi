@@ -20,6 +20,7 @@ import { ANTIGRAVITY_PRIMARY_ENDPOINT, fetchAntigravityDiscoveryModels } from ".
 import { buildGitLabDuoWorkflowFallbackModel } from "../src/discovery/gitlab-duo-workflow";
 import { createModelManager } from "../src/model-manager";
 import prevModelsJson from "../src/models.json" with { type: "json" };
+import { resolveOpenAIDaybreakStandardCost } from "../src/openai-pricing";
 import { toModelSpec } from "../src/provider-models/bundled-references";
 import {
 	allowsUnauthenticatedCatalogDiscovery,
@@ -285,7 +286,7 @@ function applyCodexPricingFallback(models: readonly ModelSpec[]): ModelSpec[] {
 			return model;
 		}
 
-		const openAICost = openAIModels.get(model.id);
+		const openAICost = openAIModels.get(model.id) ?? resolveOpenAIDaybreakStandardCost(model.id);
 		if (!openAICost) {
 			return model;
 		}
