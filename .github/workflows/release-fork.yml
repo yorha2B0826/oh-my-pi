@@ -87,3 +87,5 @@ jobs:
                  packages/coding-agent/binaries/omp-*
                  SHA256SUMS.txt
               generate_release_notes: true
+              # 同一 tag 重跑时覆盖已有 release 资产(用于修复后重新构建替换,不创建新 release)
+              update_release: true
