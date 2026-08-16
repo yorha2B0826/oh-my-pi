@@ -94,14 +94,35 @@ omp iwan stop       # 断开隧道
 
 > 隧道带心跳保活与死亡检测:网络抖动断线后会自动重连,无需手动干预。
 
-### 2. 使用 USTC 模型
+### 2. 配置 USTC LLM API 并开始使用
+
+USTC 的 LLM 网关(`api.llm.ustc.edu.cn`)是校内 LiteLLM 服务,接入方式二选一:
+
+**方式 A:交互式登录(推荐)**
 
 ```bash
 omp
-/model              # 在模型选择器中选 ustc 提供商(自动从网关 /v1/models 动态发现)
+/login        # 在会话内执行,选择 USTC 提供商
 ```
 
-`api.llm.ustc.edu.cn` 是 USTC 校内的 LiteLLM 网关,模型列表动态变化;本 fork 已按模型映射正确的上下文窗口(如 1M 上下文模型不再被错误截断)。
+按提示 **从 USTC LLM 网关控制台复制 API key**(`sk-...`)粘贴即可。程序会用 `GET https://api.llm.ustc.edu.cn/v1/models` 自动验证 key 是否有效,并把凭据存入本地凭据库(credential vault)。
+
+**方式 B:环境变量**
+
+```bash
+export USTC_API_KEY="sk-..."
+```
+
+> key 的获取与续期都在 USTC LLM 网关控制台完成;iWAN 隧道连接后,模型请求自动走隧道,无需其他配置。
+
+配置好后:
+
+```bash
+omp
+/model        # 模型选择器中选 ustc 提供商(自动从网关 /v1/models 动态发现)
+```
+
+`api.llm.ustc.edu.cn` 的模型列表随网关部署动态变化;本 fork 已按模型映射正确的上下文窗口(如 1M 上下文模型不再被错误截断)。
 
 ### 3. 日常使用
 
