@@ -1575,17 +1575,19 @@ function buildParams(
 		if (options?.minP !== undefined) {
 			params.min_p = options.minP;
 		}
-		if (options?.presencePenalty !== undefined) {
-			params.presence_penalty = options.presencePenalty;
-		}
-		if (options?.repetitionPenalty !== undefined) {
-			params.repetition_penalty = options.repetitionPenalty;
-		}
-		if (options?.frequencyPenalty !== undefined) {
-			params.frequency_penalty = options.frequencyPenalty;
+		if (initialCompat.supportsPenaltyAndStopParams) {
+			if (options?.presencePenalty !== undefined) {
+				params.presence_penalty = options.presencePenalty;
+			}
+			if (options?.repetitionPenalty !== undefined) {
+				params.repetition_penalty = options.repetitionPenalty;
+			}
+			if (options?.frequencyPenalty !== undefined) {
+				params.frequency_penalty = options.frequencyPenalty;
+			}
 		}
 	}
-	if (options?.stopSequences?.length) {
+	if (options?.stopSequences?.length && initialCompat.supportsPenaltyAndStopParams) {
 		const seqs = options.stopSequences;
 		params.stop = seqs.length === 1 ? seqs[0] : seqs.slice(0, 4);
 	}

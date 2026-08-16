@@ -51,6 +51,7 @@ const compat: ResolvedOpenAICompat = {
 	toolStrictMode: "none",
 	supportsReasoningParams: true,
 	supportsSamplingParams: true,
+	supportsPenaltyAndStopParams: true,
 	alwaysSendMaxTokens: false,
 	isOpenRouterHost: false,
 	isVercelGatewayHost: false,

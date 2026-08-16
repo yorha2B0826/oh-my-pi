@@ -27,6 +27,8 @@
  *
  * Set `OMP_NATIVE_BUILD_BACKEND=cargo` to route the host target through the
  * same local N-API build on systems where Bazel's prebuilt host tools cannot run.
+ * The host target also selects that backend automatically when neither bazelisk
+ * nor bazel is available on PATH.
  *
  * Note: musl addons intentionally reuse the plain linux-<arch> filenames, so a
  * `linux-all` copy overwrites the gnu addon with the musl one (and vice versa);
@@ -174,14 +176,8 @@ export function parseCliArgs(argv: string[]): CliOptions {
 	return { targets, dest, source, bazelArgs };
 }
 
-function resolveBazelBinary(): string {
-	const bin = Bun.which("bazelisk") ?? Bun.which("bazel");
-	if (!bin) {
-		throw new Error(
-			"Neither `bazelisk` nor `bazel` found on PATH. Install bazelisk: https://github.com/bazelbuild/bazelisk",
-		);
-	}
-	return bin;
+function resolveBazelBinary(): string | null {
+	return Bun.which("bazelisk") ?? Bun.which("bazel");
 }
 
 const STDERR_TAIL_LINES = 40;
@@ -250,7 +246,8 @@ async function main(): Promise<void> {
 	const host: HostInfo = { platform: process.platform, arch: process.arch, avx2: detectHostAvx2Support() };
 	const destDir = options.dest ? path.resolve(options.dest) : path.join(repoRoot, "packages/natives/native");
 
-	if ((host.platform === "win32" || Bun.env.OMP_NATIVE_BUILD_BACKEND === "cargo") && !options.source) {
+	const cargoBackend = Bun.env.OMP_NATIVE_BUILD_BACKEND === "cargo";
+	if ((host.platform === "win32" || cargoBackend) && !options.source) {
 		if (options.targets.length !== 1 || options.targets[0] !== "host") {
 			if (host.platform === "win32") {
 				throw new Error(
@@ -274,6 +271,17 @@ async function main(): Promise<void> {
 	} else {
 		const labels = resolveTargetLabels(options.targets, host);
 		const bazel = resolveBazelBinary();
+		if (!bazel) {
+			if (options.targets.length !== 1 || options.targets[0] !== "host") {
+				throw new Error(
+					`Neither \`bazelisk\` nor \`bazel\` found on PATH; Cargo fallback supports only the host target, not [${options.targets.join(", ")}]. ` +
+						"Install bazelisk or request `host` for a local Cargo/N-API build.",
+				);
+			}
+			console.log("bazelisk/bazel not found; falling back to the local Cargo/N-API host build");
+			await buildLocalHostAddon(host, destDir);
+			return;
+		}
 		// CI hands cache wiring (remote or disk) through a bazelrc fragment so
 		// endpoint composition stays in .github/actions/bazel-cache.
 		const rcPath = Bun.env.OMP_BAZEL_RC?.trim();

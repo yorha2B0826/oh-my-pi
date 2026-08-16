@@ -1678,17 +1678,22 @@ export class ModelRegistry {
 	 *
 	 * Side-effect-free and synchronous: a command-backed key (`!cmd`) counts as
 	 * configured by its presence alone — the program is NOT executed — and OAuth
-	 * tokens are NOT refreshed (`authStorage.hasAuth`). This is what keeps the
+	 * tokens are NOT refreshed (`authStorage.hasResolvableAuth`). This is what keeps the
 	 * model-switch pre-flight off the event loop's hot path; the real key
 	 * (command execution + OAuth refresh) is resolved lazily per request via
 	 * {@link ModelRegistry.resolver}.
+	 *
+	 * Cross-provider env aliases count here (`xai-oauth` can borrow `XAI_API_KEY`)
+	 * so an explicit `xai-oauth/…` selector does not fail with "No API key".
+	 * Default-model availability still uses {@link AuthStorage.hasAuth}, which
+	 * ignores that alias so SuperGrok is not auto-selected from a paid key.
 	 */
 	hasConfiguredAuth(model: Model<Api>): boolean {
 		const keyConfig = this.#customProviderApiKeys.get(model.provider);
 		return (
 			isCommandConfigValue(keyConfig) ||
 			this.#keylessProviders.has(model.provider) ||
-			this.authStorage.hasAuth(model.provider)
+			this.authStorage.hasResolvableAuth(model.provider)
 		);
 	}
 

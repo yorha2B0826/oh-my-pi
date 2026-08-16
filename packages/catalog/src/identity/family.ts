@@ -110,7 +110,13 @@ export const isGrokModelId = memo((modelId: string): boolean => {
 	return /(?:^|[./_-])grok(?:[-.]|$)/i.test(modelId);
 });
 
-const GROK_EFFORT_CAPABLE_PREFIXES = ["grok-3-mini", "grok-4.20-multi-agent", "grok-4.3", "grok-4.5"] as const;
+const GROK_EFFORT_CAPABLE_PREFIXES = [
+	"grok-3-mini",
+	"grok-4.20-multi-agent",
+	"grok-4.3",
+	"grok-4.5",
+	"grok-4.6",
+] as const;
 
 /**
  * Grok SKUs that expose the wire `reasoning.effort` dial. Other Grok reasoners
@@ -121,6 +127,27 @@ export const isGrokReasoningEffortCapable = memo((modelId: string): boolean => {
 	const bare = bareModelId(modelId).trim().toLowerCase();
 	if (!bare) return false;
 	return GROK_EFFORT_CAPABLE_PREFIXES.some(prefix => bare.startsWith(prefix));
+});
+
+/**
+ * `grok-4.20-multi-agent*` uses `reasoning.effort` to pick agent count
+ * (`xhigh` is the 16-agent mode). Other first-party Grok effort SKUs stay on
+ * `low|medium|high` unless {@link isGrokXHighEffortCapable} (currently
+ * `grok-4.6*` plus multi-agent).
+ * https://docs.x.ai/developers/model-capabilities/text/reasoning
+ */
+export const isGrokMultiAgentModelId = memo((modelId: string): boolean => {
+	return bareModelId(modelId).trim().toLowerCase().startsWith("grok-4.20-multi-agent");
+});
+
+/**
+ * First-party Grok SKUs whose Responses wire accepts `reasoning.effort: "xhigh"`.
+ * `grok-4.6*` documents xhigh as a reasoning depth; multi-agent uses it as
+ * 16-agent mode. `grok-4.5` / `grok-4.3` / `grok-3-mini` do not.
+ */
+export const isGrokXHighEffortCapable = memo((modelId: string): boolean => {
+	if (isGrokMultiAgentModelId(modelId)) return true;
+	return bareModelId(modelId).trim().toLowerCase().startsWith("grok-4.6");
 });
 
 /**

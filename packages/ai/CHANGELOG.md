@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Stopped treating `XAI_API_KEY` as SuperGrok (`xai-oauth`) sign-in for availability, so paid-key-only setups default to `xai/grok-4.5` instead of the zero-cost SuperGrok catalog path. Explicit `xai-oauth/…` selectors still accept the paid key via the existing env fallback.
+- Omitted unsupported `reasoning.summary` on paid xAI Responses requests (`xai/grok-4.5`), matching SuperGrok, so a thinking level no longer serializes `summary: "auto"`.
+- Omitted presence/frequency penalties on all first-party xAI Responses models, including non-reasoning ids such as `xai/grok-2`.
+
 ## [17.3.4] - 2026-08-14
 
 ### Fixed

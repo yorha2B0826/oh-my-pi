@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Routed paid xAI models (`XAI_API_KEY` / `xai/…`) through the Responses API used by SuperGrok OAuth instead of Chat Completions.
+- Changed the default model for `XAI_API_KEY` (`xai`) from `grok-4-fast-non-reasoning` to `grok-4.5`.
+- Changed the default model for SuperGrok OAuth (`xai-oauth`) from `grok-4.3` to `grok-4.5`.
+- Included `reasoning.encrypted_content` in Responses `include` for paid xAI and SuperGrok OAuth models.
+- Replayed encrypted xAI reasoning on follow-up Responses turns for `xai` and `xai-oauth`.
+- Kept automatic model selection on paid `xai/grok-4.5` when only `XAI_API_KEY` is set, instead of preferring SuperGrok `xai-oauth/grok-4.5`. Explicit `xai-oauth/grok-4.5` still works with that paid key.
+- Stopped sending presence/frequency penalties and stop sequences to xAI reasoning models such as `grok-4.5`, which reject them.
+
 ## [17.3.4] - 2026-08-14
 
 ### Changed

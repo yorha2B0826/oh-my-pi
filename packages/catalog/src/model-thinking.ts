@@ -27,6 +27,7 @@ import {
 	isDeepseekV4FlashModelId,
 	isGlm52ReasoningEffortModelId,
 	isGlm53ReasoningEffortModelId,
+	isGrokXHighEffortCapable,
 	isKimiK3ModelId,
 	isMimoModelIdOrName,
 	isMinimaxM2FamilyModelId,
@@ -403,6 +404,11 @@ function getModelDefinedEfforts<TApi extends Api>(
 	if (spec.provider === "baseten" && isOpenAIGptOssModelId(spec.id)) {
 		// Baseten's gpt-oss router mirrors its GLM route: high/max only.
 		return HIGH_MAX_REASONING_EFFORTS;
+	}
+	// First-party Grok: `grok-4.6*` and `grok-4.20-multi-agent*` advertise
+	// `xhigh`. Other effort-capable SKUs stay on `minimal/low/medium/high`.
+	if (modelMatchesHost({ provider: spec.provider, baseUrl: spec.baseUrl ?? "" }, "xai")) {
+		return isGrokXHighEffortCapable(spec.id) ? DEFAULT_REASONING_EFFORTS_WITH_XHIGH : DEFAULT_REASONING_EFFORTS;
 	}
 	return isOpenAICompatReasoningApi(spec.api) &&
 		(isMinimaxM2FamilyModelId(spec.id) ||
