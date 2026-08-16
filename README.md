@@ -39,9 +39,30 @@ omp(oh-my-pi)是一个把 IDE 接进来的 AI 编码代理:60+ 模型提供商�
 
 ## 安装
 
-### macOS(Apple Silicon)与 Linux
+### 一条命令(curl 安装脚本,推荐)
 
-**Homebrew(推荐,macOS)**
+**macOS(Apple Silicon)与 Linux:**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/yorha2B0826/oh-my-pi/main/scripts/install.sh | sh
+```
+
+从 fork 的 GitHub Releases 下载对应平台二进制(`omp-darwin-arm64` / `omp-linux-arm64` / `omp-linux-x64`),安装到 `~/.local/bin/omp` 并自动验证可运行。
+
+安装指定版本:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/yorha2B0826/oh-my-pi/main/scripts/install.sh | sh -s -- --ref v17.3.5
+```
+
+> **国内网络**:下载 GitHub Releases 大文件偶尔会断。脚本内置 5 次断点续传重试;仍失败可挂镜像:
+> ```sh
+> export GH_MIRROR="https://gh-proxy.com/"
+> curl -fsSL https://raw.githubusercontent.com/yorha2B0826/oh-my-pi/main/scripts/install.sh | sh
+> ```
+> 若 `~/.local/bin` 不在 PATH,手动加:`export PATH="$HOME/.local/bin:$PATH"`
+
+### Homebrew(macOS)
 
 ```bash
 brew tap yorha2b0826/omp-ustc
