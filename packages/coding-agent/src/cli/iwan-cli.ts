@@ -23,7 +23,6 @@ export interface IwanCommandArgs {
 	flags: {
 		json?: boolean;
 		index?: number;
-		redirect?: string;
 	};
 }
 
@@ -64,52 +63,54 @@ async function handleLogin(cmd: IwanCommandArgs): Promise<void> {
 	try {
 		const status = await iwanManager.beginLogin();
 		if (status.state === "servers") {
-			// Already logged in — reconnect without another browser round-trip.
-			printStatus(await iwanManager.connect(status.selected ?? 0), cmd.flags.json);
-			return;
-		}
-		if (status.state === "connected") {
-			printStatus(status, cmd.flags.json);
-			return;
-		}
-		if (!status.loginURL) {
-			process.stdout.write(chalk.red("Error: iWAN login did not produce a URL.\n"));
-			process.exitCode = 1;
-			return;
-		}
-
-		// JSON mode stays non-interactive for scripting.
-		if (cmd.flags.json) {
-			process.stdout.write(JSON.stringify({ loginURL: status.loginURL }, null, 2));
-			process.stdout.write("\n");
-			return;
-		}
-
-		process.stdout.write(chalk.bold("iWAN login:\n"));
-		openBrowser(status.loginURL);
-		process.stdout.write(`  Opening ${chalk.cyan(status.loginURL)}\n`);
-		process.stdout.write(
-			`  After authorizing you'll land on a ${chalk.dim("com.panabit.mobile://oauth2redirect?...")} URL.\n`,
-		);
-		process.stdout.write(`  Paste that redirect URL here:\n`);
-
-		const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-		try {
-			const redirect = (await rl.question("> ")).trim();
-			if (!redirect) {
-				process.stdout.write(chalk.yellow("No redirect URL pasted; login aborted. Re-run `omp iwan login`.\n"));
+			// Already logged in — no browser round-trip; point at the network picker.
+			if (cmd.flags.json) {
+				printStatus(status, true);
 				return;
 			}
-			await iwanManager.completeLogin(redirect);
-			const connected = await iwanManager.connect(0);
 			process.stdout.write(
-				chalk.green(
-					`Connected to "${connected.server?.name}" via SOCKS5 at ${connected.proxy?.address}:${connected.proxy?.port}\n`,
-				),
+				chalk.dim(`iWAN: already logged in as ${status.username} — choose a network with \`omp iwan connect\`.\n`),
 			);
-			return;
-		} finally {
-			rl.close();
+			printServerList(status);
+		} else if (status.state === "connected") {
+			printStatus(status, cmd.flags.json);
+		} else if (status.loginURL) {
+			// JSON mode stays non-interactive for scripting.
+			if (cmd.flags.json) {
+				process.stdout.write(JSON.stringify({ loginURL: status.loginURL }, null, 2));
+				process.stdout.write("\n");
+				return;
+			}
+
+			process.stdout.write(chalk.bold("iWAN login:\n"));
+			openBrowser(status.loginURL);
+			process.stdout.write(`  Opening ${chalk.cyan(status.loginURL)}\n`);
+			process.stdout.write(
+				`  After authorizing you'll land on a ${chalk.dim("com.panabit.mobile://oauth2redirect?...")} URL.\n`,
+			);
+			process.stdout.write(`  Paste that redirect URL here:\n`);
+
+			const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+			try {
+				const redirect = (await rl.question("> ")).trim();
+				if (!redirect) {
+					process.stdout.write(chalk.yellow("No redirect URL pasted; login aborted. Re-run `omp iwan login`.\n"));
+					return;
+				}
+				const loggedIn = await iwanManager.completeLogin(redirect);
+				process.stdout.write(
+					chalk.green(
+						`iWAN: logged in as ${loggedIn.username ?? "unknown"} — ${loggedIn.servers.length} networks.\n`,
+					),
+				);
+				process.stdout.write(`Run ${chalk.bold("omp iwan connect")} to choose a network.\n`);
+				return;
+			} finally {
+				rl.close();
+			}
+		} else {
+			process.stdout.write(chalk.red("Error: iWAN login did not produce a URL.\n"));
+			process.exitCode = 1;
 		}
 	} catch (err) {
 		process.stdout.write(chalk.red(`Error: ${errMsg(err)}\n`));
@@ -119,31 +120,63 @@ async function handleLogin(cmd: IwanCommandArgs): Promise<void> {
 
 async function handleConnect(cmd: IwanCommandArgs): Promise<void> {
 	try {
-		// If a redirect URL is supplied, complete the pending OAuth login first.
-		if (cmd.flags.redirect) {
-			await iwanManager.completeLogin(cmd.flags.redirect);
-		}
-		const index = cmd.flags.index ?? (cmd.args[0] !== undefined ? Number.parseInt(cmd.args[0], 10) : 0);
-		if (Number.isNaN(index) || index < 0) {
-			process.stdout.write(chalk.red("Error: server index must be a non-negative integer\n"));
+		const status = iwanManager.status();
+		if (status.servers.length === 0) {
+			process.stdout.write(chalk.red("Error: no networks available. Run `omp iwan login` first.\n"));
 			process.exitCode = 1;
 			return;
 		}
-		const status = await iwanManager.connect(index);
-		if (cmd.flags.json) {
-			process.stdout.write(JSON.stringify(status, null, 2));
-			process.stdout.write("\n");
+
+		const rawIndex: number | string | undefined =
+			cmd.flags.index ?? (cmd.args[0] !== undefined ? cmd.args[0] : undefined);
+		let index: number | undefined;
+		if (typeof rawIndex === "number") {
+			index = rawIndex;
+		} else if (rawIndex !== undefined) {
+			index = Number.parseInt(rawIndex, 10);
+		} else if (cmd.flags.json) {
+			// JSON mode stays non-interactive for scripting.
+			process.stdout.write(chalk.red("Error: server index required in JSON mode (use --index <n>)\n"));
+			process.exitCode = 1;
+			return;
+		} else {
+			printServerList(status);
+			const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+			try {
+				const answer = (await rl.question("Choose a network [0-...] > ")).trim();
+				index = Number.parseInt(answer, 10);
+			} finally {
+				rl.close();
+			}
+		}
+
+		if (Number.isNaN(index) || index === undefined || index < 0 || index >= status.servers.length) {
+			process.stdout.write(
+				chalk.red(`Error: server index must be an integer between 0 and ${status.servers.length - 1}\n`),
+			);
+			process.exitCode = 1;
 			return;
 		}
-		process.stdout.write(
-			chalk.green(
-				`Connected to "${status.server?.name}" via SOCKS5 at ${status.proxy?.address}:${status.proxy?.port}\n`,
-			),
-		);
+
+		await connectAndPrint(cmd, index);
 	} catch (err) {
 		process.stdout.write(chalk.red(`Error: ${errMsg(err)}\n`));
 		process.exitCode = 1;
 	}
+}
+
+async function connectAndPrint(cmd: IwanCommandArgs, index: number): Promise<void> {
+	const status = await iwanManager.connect(index);
+	if (cmd.flags.json) {
+		process.stdout.write(JSON.stringify(status, null, 2));
+		process.stdout.write("\n");
+		return;
+	}
+	process.stdout.write(
+		chalk.green(
+			`Connected to "${status.server?.name}" via SOCKS5 at ${status.proxy?.address}:${status.proxy?.port}\n`,
+		),
+	);
 }
 
 async function handleStatus(cmd: IwanCommandArgs): Promise<void> {
@@ -173,18 +206,22 @@ async function handleServers(cmd: IwanCommandArgs): Promise<void> {
 		return;
 	}
 	if (status.servers.length === 0) {
-		process.stdout.write(chalk.dim("No servers. Run /iwan login first.\n"));
+		process.stdout.write(chalk.dim("No networks. Run `omp iwan login` first.\n"));
 		return;
 	}
-	status.servers.forEach((server, index) => {
-		const marker = index === status.selected ? chalk.green("▶") : " ";
-		process.stdout.write(`  ${marker} [${index}] ${server.name} (${server.host}:${server.port})\n`);
-	});
+	printServerList(status);
 }
 
 // =============================================================================
 // Helpers
 // =============================================================================
+
+function printServerList(status: IwanStatus): void {
+	status.servers.forEach((server, index) => {
+		const marker = index === status.selected ? chalk.green("▶") : " ";
+		process.stdout.write(`  ${marker} [${index}] ${server.name} (${server.host}:${server.port})\n`);
+	});
+}
 
 function printStatus(status: IwanStatus, json: boolean | undefined): void {
 	if (json) {
@@ -197,11 +234,15 @@ function printStatus(status: IwanStatus, json: boolean | undefined): void {
 			process.stdout.write(chalk.dim("iWAN: disconnected. Run `omp iwan login` to start.\n"));
 			break;
 		case "login":
-			process.stdout.write(chalk.yellow(`iWAN: awaiting login (${status.loginURL})\n`));
+			process.stdout.write(
+				chalk.yellow(`iWAN: awaiting login — re-run \`omp iwan login\` to continue (${status.loginURL})\n`),
+			);
 			break;
 		case "servers":
 			process.stdout.write(
-				chalk.dim(`iWAN: logged in as ${status.username} (${status.servers.length} servers); not connected.\n`),
+				chalk.dim(
+					`iWAN: logged in as ${status.username} (${status.servers.length} networks); choose one with \`omp iwan connect\`.\n`,
+				),
 			);
 			break;
 		case "connecting":

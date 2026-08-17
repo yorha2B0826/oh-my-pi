@@ -30,6 +30,7 @@ import {
 	getPluginsCacheDir,
 	MarketplaceManager,
 } from "../../extensibility/plugins/marketplace";
+import { iwanManager } from "../../iwan/service";
 import {
 	getAvailableThemes,
 	getSymbolTheme,
@@ -86,6 +87,7 @@ import { AssistantMessageComponent } from "../components/assistant-message";
 import { CopySelectorComponent } from "../components/copy-selector";
 import { ExtensionDashboard } from "../components/extensions";
 import { HistorySearchComponent } from "../components/history-search";
+import { IwanServerSelectorComponent } from "../components/iwan-server-selector";
 import { LoginDialogComponent } from "../components/login-dialog";
 import { LogoutAccountSelectorComponent } from "../components/logout-account-selector";
 import { ModelHubComponent, type ModelRoleSelectionScope } from "../components/model-hub";
@@ -1876,6 +1878,38 @@ export class SelectorController {
 			);
 			return { component: selector, focus: selector };
 		});
+	}
+
+	/**
+	 * Present the controller-advertised iWAN networks as a picker mounted in
+	 * the editor slot. Resolves with the chosen server index, or `undefined`
+	 * when the user cancels or no servers are available yet.
+	 */
+	async showIwanServerSelector(): Promise<number | undefined> {
+		await iwanManager.init();
+		const status = iwanManager.status();
+		if (status.servers.length === 0) {
+			this.ctx.showStatus("No iWAN networks available yet; run /iwan login first.");
+			return undefined;
+		}
+		this.ctx.showStatus("Choose an iWAN network…", { dim: true });
+		const { promise, resolve } = Promise.withResolvers<number | undefined>();
+		this.showSelector(done => {
+			const selector = new IwanServerSelectorComponent(
+				status.servers,
+				status.selected,
+				index => {
+					done();
+					resolve(index);
+				},
+				() => {
+					done();
+					resolve(undefined);
+				},
+			);
+			return { component: selector, focus: selector };
+		});
+		return promise;
 	}
 
 	async showSessionPinSelector(): Promise<void> {

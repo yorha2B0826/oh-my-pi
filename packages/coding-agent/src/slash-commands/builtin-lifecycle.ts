@@ -8,7 +8,7 @@ import { COMPACT_MODES, parseCompactArgs } from "../session/compact-modes";
 import { resolveResumableSession } from "../session/session-listing";
 import { formatShakeSummary, type ShakeMode } from "../session/shake-types";
 import { resolveToCwd } from "../tools/path-utils";
-import { handleIwanAcp } from "./helpers/iwan";
+import { handleIwanAcp, handleIwanTui, IWAN_MANUAL_INPUT_PROVIDER_ID } from "./helpers/iwan";
 import { commandConsumed, errorMessage, usage } from "./helpers/parse";
 import { handleSshAcp } from "./helpers/ssh";
 import type {
@@ -77,24 +77,25 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 		description: "Connect to the USTC campus VPN tunnel",
 		acpDescription: "Manage the USTC iWAN VPN tunnel",
 		inlineHint: "<subcommand>",
+		getTuiAutocompleteDescription: runtime =>
+			runtime.ctx.oauthManualInput.pendingProviderId === IWAN_MANUAL_INPUT_PROVIDER_ID
+				? "iWAN: waiting for the redirect URL (Esc cancels)"
+				: undefined,
 		subcommands: [
-			{ name: "login", description: "Start OAuth login; prints a URL" },
-			{ name: "connect", description: "Complete login + connect a server", usage: '[<index>] [--redirect "<url>"]' },
+			{
+				name: "login",
+				description: "Open the OAuth URL and wait for the redirect link",
+				usage: "[<redirect-url>]",
+			},
+			{ name: "connect", description: "Choose an advertised network and connect", usage: "[<index>]" },
 			{ name: "status", description: "Show tunnel state" },
-			{ name: "servers", description: "List controller-advertised servers" },
+			{ name: "servers", description: "List controller-advertised networks" },
 			{ name: "stop", description: "Tear down the tunnel" },
 			{ name: "help", description: "Show help message" },
 		],
 		allowArgs: true,
 		handle: handleIwanAcp,
-	},
-	{
-		name: "new",
-		description: "Start a new session",
-		handleTui: async (_command, runtime) => {
-			runtime.ctx.editor.setText("");
-			await runtime.ctx.handleClearCommand();
-		},
+		handleTui: handleIwanTui,
 	},
 	{
 		name: "fresh",

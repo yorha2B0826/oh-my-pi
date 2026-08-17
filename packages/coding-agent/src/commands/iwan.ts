@@ -25,7 +25,6 @@ export default class Iwan extends Command {
 	static flags = {
 		json: Flags.boolean({ description: "Output JSON" }),
 		index: Flags.integer({ description: "Server index for `connect`" }),
-		redirect: Flags.string({ description: "OAuth redirect URL for `connect` (completes login)" }),
 	};
 
 	async run(): Promise<void> {
@@ -38,7 +37,6 @@ export default class Iwan extends Command {
 			flags: {
 				json: flags.json,
 				index: flags.index,
-				redirect: flags.redirect,
 			},
 		};
 

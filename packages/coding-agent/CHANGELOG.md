@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added an interactive iWAN network picker to `/iwan connect` (TUI) and an index prompt to `omp iwan connect`, so connecting chooses among the controller-advertised networks instead of defaulting to the first one.
+
+### Changed
+
+- `/iwan login` now opens the authorization URL and waits for the pasted redirect URL (`/iwan login <redirect-url>` in the TUI, stdin prompt in the CLI) to complete login; login no longer auto-connects to a network.
+
+### Removed
+
+- Removed the `--redirect` flag from `omp iwan connect`; the pending OAuth login is completed through `/iwan login <redirect-url>` instead.
+
 ## [17.3.5] - 2026-08-16
 
 ### Added

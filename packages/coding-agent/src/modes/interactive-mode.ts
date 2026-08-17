@@ -5019,6 +5019,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		return runProviderSetupWizard(this);
 	}
 
+	showIwanServerSelector(): Promise<number | undefined> {
+		return this.#selectorController.showIwanServerSelector();
+	}
+
 	showHookConfirm(title: string, message: string): Promise<boolean> {
 		return this.#extensionUiController.showHookConfirm(title, message);
 	}

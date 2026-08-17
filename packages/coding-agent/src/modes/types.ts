@@ -408,6 +408,7 @@ export interface InteractiveModeContext {
 	showProviderSetup(): Promise<void>;
 	showHookConfirm(title: string, message: string): Promise<boolean>;
 	showDebugSelector(): Promise<void>;
+	showIwanServerSelector(): Promise<number | undefined>;
 	showAgentHub(options?: { requireContent?: boolean; armCloseTap?: boolean }): void;
 	resetObserverRegistry(): void;
 
