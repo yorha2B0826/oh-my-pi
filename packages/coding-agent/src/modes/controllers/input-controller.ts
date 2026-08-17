@@ -22,6 +22,7 @@ import type { InteractiveModeContext } from "../../modes/types";
 import manualContinuePrompt from "../../prompts/system/manual-continue.md" with { type: "text" };
 import { USER_INTERRUPT_LABEL } from "../../session/messages";
 import { executeBuiltinSlashCommand } from "../../slash-commands/builtin-registry";
+import { IWAN_MANUAL_INPUT_PROVIDER_ID } from "../../slash-commands/helpers/iwan";
 import { parseSlashCommand } from "../../slash-commands/helpers/parse";
 import { isTinyTitleLocalModelKey } from "../../tiny/models";
 import { tinyTitleClient } from "../../tiny/title-client";
@@ -725,6 +726,21 @@ export class InputController {
 					imageLinks: inputImageLinks,
 				});
 				return;
+			}
+
+			// iWAN login 等待期:直接粘贴的 redirect URL(非斜杠命令)作为
+			// OAuth 回调提交,用户无需再输 /iwan login <url>。仅拦截 iWAN
+			// 的 claim,供应商 /login 的等待流程不受影响。
+			if (text && !text.startsWith("/")) {
+				const manualInput = this.ctx.oauthManualInput;
+				if (manualInput.hasPending() && manualInput.pendingProviderId === IWAN_MANUAL_INPUT_PROVIDER_ID) {
+					if (manualInput.submit(text)) {
+						this.ctx.editor.clearDraft();
+						this.ctx.editor.addToHistory(text);
+						this.ctx.showStatus("iWAN redirect URL received; completing login…");
+						return;
+					}
+				}
 			}
 
 			// Handle built-in slash commands

@@ -131,7 +131,7 @@ export async function handleIwanTui(command: ParsedSlashCommand, runtime: TuiSla
 			const status = iwanManager.status();
 			ctx.showStatus(
 				status.state === "login"
-					? "iWAN: awaiting login — paste the redirect URL with /iwan login <redirect-url>."
+					? "iWAN: awaiting login — paste the redirect URL here (Esc cancels)."
 					: formatStatus(status),
 			);
 			break;
@@ -182,7 +182,7 @@ async function handleTuiLogin(runtime: TuiSlashCommandRuntime, rest: string): Pr
 
 	if (manualInput.hasPending()) {
 		if (manualInput.pendingProviderId === IWAN_MANUAL_INPUT_PROVIDER_ID) {
-			ctx.showWarning("iWAN login already in progress. Paste the redirect URL with /iwan login <redirect-url>.");
+			ctx.showWarning("iWAN login already in progress. Paste the redirect URL here (Esc cancels).");
 		} else {
 			ctx.showWarning(`OAuth login for ${manualInput.pendingProviderId} is already in progress.`);
 		}
@@ -217,11 +217,28 @@ async function handleTuiLogin(runtime: TuiSlashCommandRuntime, rest: string): Pr
 
 	const previousOnEscape = ctx.editor.onEscape;
 	ctx.editor.onEscape = () => claim.clear("iWAN login cancelled");
+	// 等待用户直接粘贴 redirect URL(回车即提交,无需再输 /iwan login <url>)。
+	// 超时保护:5 分钟内未收到链接则认证失败,不再无限等待。
+	const AUTH_TIMEOUT_MS = 5 * 60 * 1000;
 	let redirect: string;
 	try {
-		redirect = await claim.promise;
-	} catch {
-		ctx.showStatus("iWAN login cancelled.", { dim: true });
+		redirect = await Promise.race([
+			claim.promise,
+			new Promise<never>((_, reject) =>
+				setTimeout(
+					() => reject(new Error(`iWAN authentication timed out after ${AUTH_TIMEOUT_MS / 1000}s`)),
+					AUTH_TIMEOUT_MS,
+				),
+			),
+		]);
+	} catch (err) {
+		claim.clear("iWAN login ended");
+		const reason = err instanceof Error ? err.message : String(err);
+		if (reason === "iWAN login cancelled") {
+			ctx.showStatus("iWAN login cancelled.", { dim: true });
+		} else {
+			ctx.showError(`iWAN login failed: ${reason}`);
+		}
 		return;
 	} finally {
 		ctx.editor.onEscape = previousOnEscape;
@@ -299,8 +316,8 @@ function presentIwanLoginBlock(ctx: TuiSlashCommandRuntime["ctx"], url: string, 
 			theme.fg(
 				"muted",
 				waiting
-					? "Complete authorization in the browser, then paste the redirect URL with /iwan login <redirect-url> (Esc cancels)."
-					: "Complete authorization in the browser, then paste the redirect URL with /iwan login <redirect-url>.",
+					? "Complete authorization in the browser, then paste the redirect URL here (Esc cancels)."
+					: "Complete authorization in the browser, then paste the redirect URL here.",
 			),
 			1,
 			0,
