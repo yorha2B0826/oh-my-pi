@@ -13,6 +13,9 @@
 ### Removed
 
 - Removed the `--redirect` flag from `omp iwan connect`; the pending OAuth login is completed through `/iwan login <redirect-url>` instead.
+### Fixed
+
+- Fixed `omp stats` and `/stats` dashboards being unreachable from container hosts by accepting an explicit `--host` bind address while preserving the `127.0.0.1` default.
 
 ## [17.3.5] - 2026-08-16
 
