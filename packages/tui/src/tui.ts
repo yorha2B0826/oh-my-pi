@@ -28,6 +28,7 @@ import {
 	encodeKittyDeletePlacement,
 	encodeKittyPlacementLine,
 	ImageProtocol,
+	isImageProtocolForced,
 	isInsideTerminalMultiplexer,
 	parseKittyDirectPlacementLine,
 	setCellDimensions,
@@ -1249,7 +1250,6 @@ export class TUI extends Container {
 	#hardwareCursorState: HardwareCursorState | null = null;
 	#hardwareCursorVisibilityKnown = false;
 	#hardwareCursorVisible = false;
-	#sixelProbePendingDa = false;
 	#sixelProbePendingGraphics = false;
 	#sixelProbeBuffer = "";
 	#sixelProbeTimeout?: NodeJS.Timeout;
@@ -2200,19 +2200,21 @@ export class TUI extends Container {
 	}
 
 	#querySixelSupport(): void {
+		// A statically known protocol (Kitty/iTerm2 terminals) or an explicit
+		// PI_FORCE_IMAGE_PROTOCOL choice — including its `off` kill switch — wins
+		// over the probe.
 		if (TERMINAL.imageProtocol) return;
-		// win32 native or WSL under Windows Terminal — both are ConPTY-hosted and
-		// reach the same WT graphics negotiation. WSL reports process.platform
-		// "linux", so a bare win32 check silently skips the probe there (#6009).
-		if (!isConPTYHosted()) return;
-		if (!Bun.env.WT_SESSION) return;
+		if (isImageProtocolForced()) return;
 		if (!process.stdin.isTTY || !process.stdout.isTTY) return;
 
 		this.#clearSixelProbeState();
-		this.#sixelProbePendingDa = true;
 		this.#sixelProbePendingGraphics = true;
 		this.#sixelProbeUnsubscribe = this.addInputListener(data => this.#handleSixelProbeInput(data));
-		this.terminal.write("\x1b[c");
+		// XTSMGRAPHICS item 2 reports the terminal's maximum SIXEL geometry. DA1
+		// attribute 4 advertises SIXEL as well, but ProcessTerminal swallows every
+		// `CSI ? … c` reply for the whole session so a late one cannot leak into the
+		// composer (#8542): those bytes never reach an input listener, so this probe
+		// cannot read them.
 		this.terminal.write("\x1b[?2;1;0S");
 		this.#sixelProbeTimeout = setTimeout(() => {
 			this.#finishSixelProbe(false);
@@ -2220,7 +2222,7 @@ export class TUI extends Container {
 	}
 
 	#handleSixelProbeInput(data: string): InputListenerResult {
-		if (!this.#sixelProbePendingDa && !this.#sixelProbePendingGraphics) {
+		if (!this.#sixelProbePendingGraphics) {
 			return undefined;
 		}
 
@@ -2229,47 +2231,24 @@ export class TUI extends Container {
 		let probeOutcome: boolean | null = null;
 
 		while (this.#sixelProbeBuffer.length > 0) {
-			const daMatch = this.#sixelProbeBuffer.match(/\x1b\[\?([0-9;]+)c/u);
 			const graphicsMatch = this.#sixelProbeBuffer.match(/\x1b\[\?2;(\d+);([0-9;]+)S/u);
+			if (!graphicsMatch || graphicsMatch.index === undefined) break;
 
-			if (!daMatch && !graphicsMatch) break;
+			passthrough += this.#sixelProbeBuffer.slice(0, graphicsMatch.index);
+			this.#sixelProbeBuffer = this.#sixelProbeBuffer.slice(graphicsMatch.index + graphicsMatch[0].length);
 
-			const daIndex = daMatch?.index ?? Number.POSITIVE_INFINITY;
-			const graphicsIndex = graphicsMatch?.index ?? Number.POSITIVE_INFINITY;
-			const useDa = daIndex <= graphicsIndex;
-			const match = useDa ? daMatch : graphicsMatch;
-			if (!match || match.index === undefined) break;
-
-			passthrough += this.#sixelProbeBuffer.slice(0, match.index);
-			this.#sixelProbeBuffer = this.#sixelProbeBuffer.slice(match.index + match[0].length);
-
-			if (useDa && this.#sixelProbePendingDa) {
-				this.#sixelProbePendingDa = false;
-				const attributes = (match[1] ?? "")
-					.split(";")
-					.map(value => Number.parseInt(value, 10))
-					.filter(value => Number.isFinite(value));
-				const hasSixelAttribute = attributes.includes(4);
-				if (hasSixelAttribute) {
-					this.#sixelProbePendingGraphics = false;
-					probeOutcome = true;
-				} else if (!this.#sixelProbePendingGraphics) {
-					probeOutcome = false;
-				}
-			} else if (!useDa && this.#sixelProbePendingGraphics) {
+			if (this.#sixelProbePendingGraphics) {
 				this.#sixelProbePendingGraphics = false;
-				const status = Number.parseInt(match[1] ?? "", 10);
-				const supportsSixel = !Number.isNaN(status) && status !== 0;
-				if (supportsSixel) {
-					this.#sixelProbePendingDa = false;
-					probeOutcome = true;
-				} else if (!this.#sixelProbePendingDa) {
-					probeOutcome = false;
-				}
+				// Reply shape `CSI ? 2 ; Ps ; Pv S`: per xterm ctlseqs Ps is the status
+				// (0 = success, 1..3 = error/failure) and Pv the maximum SIXEL geometry,
+				// which a terminal without SIXEL reports as zero.
+				const status = Number.parseInt(graphicsMatch[1] ?? "", 10);
+				const hasGeometry = (graphicsMatch[2] ?? "").split(";").some(part => Number.parseInt(part, 10) > 0);
+				probeOutcome = status === 0 && hasGeometry;
 			}
 		}
 
-		if (this.#sixelProbePendingDa || this.#sixelProbePendingGraphics) {
+		if (this.#sixelProbePendingGraphics) {
 			const partialStart = this.#getSixelProbePartialStart(this.#sixelProbeBuffer);
 			if (partialStart >= 0) {
 				passthrough += this.#sixelProbeBuffer.slice(0, partialStart);
@@ -2313,7 +2292,6 @@ export class TUI extends Container {
 			this.#sixelProbeUnsubscribe();
 			this.#sixelProbeUnsubscribe = undefined;
 		}
-		this.#sixelProbePendingDa = false;
 		this.#sixelProbePendingGraphics = false;
 		this.#sixelProbeBuffer = "";
 	}

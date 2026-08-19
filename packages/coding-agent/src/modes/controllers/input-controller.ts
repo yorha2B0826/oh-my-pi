@@ -174,6 +174,11 @@ export class InputController {
 		},
 	) {}
 
+	/** Session-level title starts (user `/skill:` via promptCustomMessage) reuse this UI. */
+	notifyTitleGenerationStart(): void {
+		this.#showTinyTitleDownloadProgress(this.ctx.settings.get("providers.tinyModel"));
+	}
+
 	#enhancedPaste?: EnhancedPasteController;
 	#focusedLeftTapListenerInstalled = false;
 	#focusedPasteListenerInstalled = false;
@@ -1653,6 +1658,38 @@ export class InputController {
 			const focusedNow = this.ctx.ui.getFocused();
 			const promptTarget =
 				focusedNow && focusedNow !== this.ctx.editor && hasPasteText(focusedNow) ? focusedNow : null;
+			// #8769: On macOS, Finder `Cmd+C` on an image file puts BOTH a
+			// `public.file-url` representation and a generated 1024x1024
+			// file-icon bitmap on the pasteboard. `arboard::get_image()`
+			// succeeds with the icon, so probing the image representation first
+			// would attach the generic Finder icon instead of the copied
+			// screenshot — a vision model then sees a white `PNG` document
+			// icon. Probe the file URLs before the bitmap and let any that
+			// resolve to a supported image file win over the icon: the
+			// authoritative file bytes are what the user copied.
+			//
+			// #3506: this branch also recovers file-url-only pasteboards
+			// (Finder selections, certain screenshot tools) where
+			// `arboard::get_image()` returns `ContentNotAvailable` and
+			// `pbpaste` is empty. Every image-shaped path routes through
+			// {@link handleImagePathPaste}, matching the bracketed-paste
+			// handler in `CustomEditor.handleInput`; multi-image Finder
+			// selections must not silently drop after the first attach.
+			// `readMacFileUrls` returns an empty list off Darwin, so on every
+			// other platform this is a no-op and the bitmap read below still
+			// runs first.
+			const fileUrls = promptTarget ? [] : ((await this.clipboard.readMacFileUrls?.()) ?? []);
+			let attachedFromFileUrls = false;
+			for (const url of fileUrls) {
+				const candidate = extractImagePathFromText(url);
+				if (!candidate) continue;
+				await this.handleImagePathPaste(candidate);
+				attachedFromFileUrls = true;
+			}
+			if (attachedFromFileUrls) return true;
+			// No usable image-file URL (pure bitmap pasteboard: screenshots,
+			// browser copies, or a non-image Finder selection). Fall to the
+			// image representation.
 			const image = await this.clipboard.readImage();
 			if (image) {
 				if (promptTarget) {
@@ -1668,27 +1705,6 @@ export class InputController {
 					`Unsupported clipboard image format: ${image.mimeType}`,
 				);
 			}
-			// #3506: macOS Finder `Cmd+C` puts only a `public.file-url`
-			// representation on the pasteboard. `pbpaste` (the backing call
-			// for `readText` on Darwin) only surfaces plain text / RTF / EPS,
-			// so it returns empty for file-url-only pasteboards — the smart
-			// text fallback below would dead-end with "Clipboard is empty".
-			// Reach the file URL directly via AppleScript and route every
-			// image-shaped path through {@link handleImagePathPaste}, matching
-			// the bracketed-paste handler in `CustomEditor.handleInput` which
-			// iterates every extracted image path. Multi-image Finder
-			// selections must not silently drop after the first attach.
-			// `readMacFileUrls` returns an empty list off Darwin, so the
-			// check is free on every other platform.
-			const fileUrls = promptTarget ? [] : ((await this.clipboard.readMacFileUrls?.()) ?? []);
-			let attachedFromFileUrls = false;
-			for (const url of fileUrls) {
-				const candidate = extractImagePathFromText(url);
-				if (!candidate) continue;
-				await this.handleImagePathPaste(candidate);
-				attachedFromFileUrls = true;
-			}
-			if (attachedFromFileUrls) return true;
 			// Smart paste (#1628): no image on the clipboard — fall back to
 			// pasting its text so the same chord covers both payload kinds.
 			// Hosts that pre-empt the terminal's own paste (VS Code's

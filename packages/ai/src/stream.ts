@@ -1092,12 +1092,18 @@ function extractStatusFromAssistantError(message: AssistantMessage): number | un
 	return AIError.status({ message: message.errorMessage });
 }
 
-function isRetryableUpstreamError(error: unknown, status: number | undefined, message: string | undefined): boolean {
+function isRetryableUpstreamError(
+	model: Model<Api>,
+	error: unknown,
+	status: number | undefined,
+	message: string | undefined,
+): boolean {
 	// 401 means the credential is bad; 403 is its valid-token twin (access
 	// denied by plan, model policy, or org restriction — a sibling account may
 	// not share it). Explicit account-scoped policy errors such as Codex
-	// `cyber_policy` are likewise rotatable: another account may carry the
-	// required approval. Usage-limit phrasing (Codex's
+	// `cyber_policy` are likewise rotatable. The exact ChatGPT-account model
+	// denial is rotatable only when its provider and requested model match.
+	// Usage-limit phrasing (Codex's
 	// "You have hit your ChatGPT usage limit", Anthropic's "usage_limit_reached",
 	// Google's "resource_exhausted", OpenAI's "insufficient_quota") and 429s
 	// without transient rate-limit wording mean this account is parked but a
@@ -1107,6 +1113,7 @@ function isRetryableUpstreamError(error: unknown, status: number | undefined, me
 	// credential block. Transient 429s ("Too many requests", per-minute caps)
 	// classify as RATE_LIMIT_EXCEEDED in `parseRateLimitReason` and stay in the
 	// provider's own backoff layer instead of burning siblings.
+	if (AIError.isCodexChatGPTAccountPolicyError(error, model.provider, model.id)) return true;
 	if (AIError.isAccountPolicyError(error)) return true;
 	if (AIError.isUsageLimit(error)) return true;
 	if (isInvalidatedOAuthTokenError(error)) return true;
@@ -1122,6 +1129,17 @@ function createAssistantAuthError(message: AssistantMessage): Error {
 			? new AIError.ProviderResponseError(text, { kind: "runtime" })
 			: new ProviderHttpError(text, status);
 	return typeof message.errorId === "number" ? AIError.attach(error, message.errorId) : error;
+}
+
+function contextualizeAuthRetryError(model: Model<Api>, error: unknown): unknown {
+	if (
+		!error ||
+		typeof error !== "object" ||
+		!AIError.isCodexChatGPTAccountPolicyError(error, model.provider, model.id)
+	) {
+		return error;
+	}
+	return AIError.attach(error, AIError.create(AIError.Flag.AccountPolicy | AIError.Flag.ContentBlocked));
 }
 
 function emitBufferedEvents(stream: AssistantMessageEventStream, events: AssistantMessageEvent[]): void {
@@ -1448,7 +1466,8 @@ function streamSimpleRequest<TApi extends Api>(
 			};
 
 			try {
-				const inner = streamSimpleRequest(model, context, { ...requestOptions, apiKey });
+				const attemptOptions = { ...requestOptions, apiKey };
+				const inner = streamSimpleRequest(model, context, attemptOptions);
 				for await (const event of inner) {
 					if (!emittedReplayUnsafeEvent && event.type === "start") {
 						bufferedEvents.push(event);
@@ -1458,12 +1477,17 @@ function streamSimpleRequest<TApi extends Api>(
 						!emittedReplayUnsafeEvent &&
 						event.type === "error" &&
 						isRetryableUpstreamError(
+							model,
 							event.error,
 							extractStatusFromAssistantError(event.error),
 							event.error.errorMessage,
 						)
 					) {
-						return { error: createAssistantAuthError(event.error), bufferedEvents, terminalEvent: event };
+						return {
+							error: contextualizeAuthRetryError(model, createAssistantAuthError(event.error)),
+							bufferedEvents,
+							terminalEvent: event,
+						};
 					}
 					flushBuffered();
 					emittedReplayUnsafeEvent = true;
@@ -1476,12 +1500,13 @@ function streamSimpleRequest<TApi extends Api>(
 				if (
 					!emittedReplayUnsafeEvent &&
 					isRetryableUpstreamError(
+						model,
 						error,
 						AIError.status(error),
 						error instanceof Error ? error.message : undefined,
 					)
 				) {
-					return { error, bufferedEvents };
+					return { error: contextualizeAuthRetryError(model, error), bufferedEvents };
 				}
 				flushBuffered();
 				outer.fail(error);
@@ -2159,7 +2184,7 @@ function mapOptionsForApi<TApi extends Api>(
 					serviceTier: options?.serviceTier,
 					thinking: {
 						enabled: true,
-						level: mapEffortToGoogleThinkingLevel(effort),
+						level: mapEffortToGoogleThinkingLevel(effort, googleModel),
 					},
 					hideThinkingSummary: options?.hideThinkingSummary,
 					toolChoice: mapGoogleToolChoice(options?.toolChoice),
@@ -2192,7 +2217,7 @@ function mapOptionsForApi<TApi extends Api>(
 						requestModelId: resolveWireModelId(model, effort),
 						thinking: {
 							enabled: true,
-							level: mapEffortToGoogleThinkingLevel(effort),
+							level: mapEffortToGoogleThinkingLevel(effort, model),
 						},
 						hideThinkingSummary: options?.hideThinkingSummary,
 						toolChoice,
@@ -2264,7 +2289,7 @@ function mapOptionsForApi<TApi extends Api>(
 					serviceTier: options?.serviceTier,
 					thinking: {
 						enabled: true,
-						level: mapEffortToGoogleThinkingLevel(effort),
+						level: mapEffortToGoogleThinkingLevel(effort, model),
 					},
 					hideThinkingSummary: options?.hideThinkingSummary,
 					toolChoice: mapGoogleToolChoice(options?.toolChoice),

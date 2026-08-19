@@ -3085,6 +3085,10 @@ export const ALIBABA_TOKEN_PLAN_DISCOVERED_MODEL_LIMITS: Readonly<Record<string,
 		contextWindow: 1_000_000,
 		maxTokens: 384_000,
 	},
+	"deepseek-v4-pro-0813": {
+		contextWindow: 1_000_000,
+		maxTokens: 384_000,
+	},
 	"deepseek-v3.2": {
 		contextWindow: 131_072,
 		maxTokens: 65_536,
