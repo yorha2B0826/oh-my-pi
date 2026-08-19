@@ -2369,6 +2369,7 @@ export class AgentSession {
 				assistantMsg.contextSnapshot = {
 					promptTokens: calculatePromptTokens(assistantMsg.usage),
 					nonMessageTokens: this.#stats.pendingNonMessageTokens ?? computeNonMessageTokens(this),
+					compactionEpoch: this.#stats.compactionEpoch,
 				};
 			}
 		}

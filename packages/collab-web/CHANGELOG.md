@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.3.8] - 2026-08-19
+
 ### Fixed
 
 - The ask tool card now renders the note the user attached to their answer; previously it was dropped from HTML exports and the collab guest view.

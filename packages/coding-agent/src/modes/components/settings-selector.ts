@@ -927,67 +927,47 @@ export class SettingsSelectorComponent implements Component {
 		}
 
 		const currentValue = this.#getCurrentValue(def);
-		const changed = this.#isChanged(def, currentValue);
+		const item = {
+			id: def.path,
+			label: def.label,
+			description: def.description,
+			warning: def.warning,
+			changed: this.#isChanged(def, currentValue),
+		};
 
 		switch (def.type) {
 			case "boolean":
-				return {
-					id: def.path,
-					label: def.label,
-					description: def.description,
-					currentValue: currentValue ? "true" : "false",
-					values: ["true", "false"],
-					changed,
-				};
+				return { ...item, currentValue: currentValue ? "true" : "false", values: ["true", "false"] };
 
 			case "enum":
-				return {
-					id: def.path,
-					label: def.label,
-					description: def.description,
-					currentValue: String(currentValue ?? ""),
-					values: [...def.values],
-					changed,
-				};
+				return { ...item, currentValue: String(currentValue ?? ""), values: [...def.values] };
 
 			case "submenu":
 				return {
-					id: def.path,
-					label: def.label,
-					description: def.description,
+					...item,
 					currentValue: this.#getSubmenuCurrentValue(def.path, currentValue),
 					submenu: (cv, done) => this.#createSubmenu(def, cv, done),
-					changed,
 				};
 
 			case "text":
 				return {
-					id: def.path,
-					label: def.label,
-					description: def.description,
+					...item,
 					currentValue: this.#formatTextInputValue(def, currentValue),
 					submenu: (cv, done) => this.#createTextInput(def, cv, done),
-					changed,
 				};
 
 			case "providerLimits":
 				return {
-					id: def.path,
-					label: def.label,
-					description: def.description,
+					...item,
 					currentValue: this.#formatProviderLimitsValue(currentValue),
 					submenu: (_cv, done) => this.#createProviderLimitsInput(done),
-					changed,
 				};
 
 			case "multiselect":
 				return {
-					id: def.path,
-					label: def.label,
-					description: def.description,
+					...item,
 					currentValue: this.#formatMultiSelectValue(def, currentValue),
 					submenu: (_cv, done) => this.#createMultiSelect(def, done),
-					changed,
 				};
 		}
 	}

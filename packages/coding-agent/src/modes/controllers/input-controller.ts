@@ -17,7 +17,7 @@ import { expandEmoticons } from "../../modes/emoji-autocomplete";
 import { materializeImageReferenceLinks, shiftImageMarkers } from "../../modes/image-references";
 import { createPromptActionAutocompleteProvider } from "../../modes/prompt-action-autocomplete";
 import { parseQueueShorthand, splitQueuedMessages } from "../../modes/queue-input";
-import { invokeSkillCommandFromText, isKnownSkillCommand } from "../../modes/skill-command";
+import { buildSkillCommandPrompt, isKnownSkillCommand } from "../../modes/skill-command";
 import type { InteractiveModeContext } from "../../modes/types";
 import manualContinuePrompt from "../../prompts/system/manual-continue.md" with { type: "text" };
 import { USER_INTERRUPT_LABEL } from "../../session/messages";
@@ -1189,21 +1189,42 @@ export class InputController {
 		};
 
 		this.ctx.editor.clearDraft(text);
+		let optimistic = false;
 		try {
-			const handled = await invokeSkillCommandFromText(this.ctx, text, streamingBehavior, {
-				images: draftImages,
-				propagateErrors: true,
-			});
-			if (!handled) {
+			// Build the user-attributed skill message once so the optimistic
+			// transcript row and the dispatched message share content.
+			const built = await buildSkillCommandPrompt(this.ctx, text, streamingBehavior, draftImages);
+			if (!built) {
 				restoreDraft();
 				return false;
 			}
+			// Paint the row before the awaited dispatch so a slow preflight (memory
+			// recall, before_agent_start hooks, auto-thinking, pre-prompt compaction)
+			// does not leave the submission invisible (issue #8895). A streaming
+			// submission queues instead and surfaces its chip, so only paint when the
+			// turn will run fresh.
+			optimistic = !this.ctx.session.isStreaming;
+			if (optimistic) {
+				// Mirror the message promptCustomMessage will build for the turn so the
+				// canonical message_start reconciles this row rather than duplicating it.
+				this.ctx.renderOptimisticSkillMessage(
+					{ role: "custom", ...built.message, timestamp: Date.now() },
+					{ imageLinks: draftImageLinks },
+				);
+			}
+			await this.ctx.session.promptCustomMessage(built.message, built.options);
 			return true;
 		} catch (error) {
+			if (optimistic) this.ctx.clearOptimisticSkillMessage();
 			restoreDraft();
 			this.ctx.showError(error instanceof Error ? error.message : String(error));
 			return true;
 		} finally {
+			if (optimistic && this.ctx.optimisticSkillMessagePending) {
+				// Dispatch resolved without a canonical skill message_start (aborted
+				// preflight, or a streaming-race requeue): drop the pending row.
+				this.ctx.clearOptimisticSkillMessage();
+			}
 			if (this.ctx.session.isStreaming) {
 				this.ctx.updatePendingMessagesDisplay();
 				this.ctx.ui.requestRender();
