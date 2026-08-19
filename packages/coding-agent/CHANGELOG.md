@@ -13,6 +13,8 @@
 ### Removed
 
 - Removed the `--redirect` flag from `omp iwan connect`; the pending OAuth login is completed through `/iwan login <redirect-url>` instead.
+- Added `providers.cacheRetention` setting (`/settings` → Providers → Protocol) to control prompt-cache retention per request: `auto` keeps the provider default (Anthropic: 5m entries with idle keep-alive refreshes), `short` forces 5m, `long` restores 1h TTLs where supported and disables the keep-alive refresh loop, `none` disables prompt caching.
+
 ## [17.3.7] - 2026-08-17
 
 ### Changed
