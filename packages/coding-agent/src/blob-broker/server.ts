@@ -30,6 +30,7 @@ import {
 	RENDER_CALLBACK_PATH,
 	RENDER_CALLBACK_TOKEN_HEADER,
 } from "./protocol";
+import { type BlobBrokerSavingsStatus, readBlobBrokerSavingsStatus } from "./savings";
 
 const CALLBACK_TIMEOUT_MS = 30_000;
 
@@ -40,6 +41,37 @@ export function blobBrokerConfigKey(config: BlobBrokerWorkerConfig): string {
 
 function json(body: unknown, status = 200): Response {
 	return Response.json(body, { status });
+}
+
+async function backendStatus(
+	backend: LocalBlobBackend,
+	config: BlobBrokerWorkerConfig,
+	baseUrl: string,
+): Promise<BlobBrokerStatus> {
+	const emptySavings: BlobBrokerSavingsStatus = {
+		journalPath: config.persist?.savingsPath ?? "",
+		entries: 0,
+		imageCount: 0,
+		inlineBytes: 0,
+		referenceBytes: 0,
+		savedBytes: 0,
+		byDestination: {},
+	};
+	let savings = emptySavings;
+	if (config.persist?.savingsPath) {
+		try {
+			savings = await readBlobBrokerSavingsStatus(config.persist.savingsPath);
+		} catch {
+			// Status remains available when the optional savings journal is unreadable.
+		}
+	}
+	return {
+		baseUrl,
+		lazy: backend.supportsLazy,
+		configKey: blobBrokerConfigKey(config),
+		...backend.storeStatus(),
+		savings,
+	};
 }
 
 /** Serve the control plane against a backend; exported for the smoke probe and tests. */
@@ -59,49 +91,27 @@ export function createControlHandler(
 			return json(info);
 		}
 		if (request.method === "GET" && pathname === "/status") {
-			const status: BlobBrokerStatus = {
-				baseUrl,
-				lazy: backend.supportsLazy,
-				configKey: blobBrokerConfigKey(config),
-				...backend.storeStatus(),
-			};
-			return json(status);
+			return json(await backendStatus(backend, config, baseUrl));
 		}
 		if (request.method === "POST" && pathname === "/doctor") {
 			const body = (await request.json()) as BlobBrokerDoctorRequest;
-			const ready = isUploaderKind(config.kind) || baseUrl.length > 0;
-			const status: BlobBrokerStatus = {
-				baseUrl,
-				lazy: backend.supportsLazy,
-				configKey: blobBrokerConfigKey(config),
-				...backend.storeStatus(),
-			};
 			const response: BlobBrokerDoctorResponse = {
-				status,
+				status: await backendStatus(backend, config, baseUrl),
 				checks: [
-					{ name: "control", ok: true, detail: "daemon control plane is responding" },
-					...(body.probe
-						? [
-								{
-									name: "backend",
-									ok: ready,
-									detail: ready ? "configured backend is ready" : "configured backend is unavailable",
-								},
-							]
-						: []),
+					{ name: "control", ok: true, status: "pass", detail: "daemon control plane is responding" },
+					...(await backend.doctor(body.probe !== false)),
 				],
 			};
 			return json(response);
 		}
 		if (request.method === "POST" && pathname === "/probe") {
 			const body = (await request.json()) as BlobBrokerProbeRequest;
-			const publication = await backend.lookupBlob(body.key);
-			const response: BlobBrokerProbeResponse = publication ? { found: true, publication } : { found: false };
+			const response: BlobBrokerProbeResponse = await backend.probePublicHealth(body.timeoutMs);
 			return json(response);
 		}
 		if (request.method === "POST" && pathname === "/purge") {
 			const body = (await request.json()) as BlobBrokerPurgeRequest;
-			const response: BlobBrokerPurgeResponse = backend.purge(body);
+			const response: BlobBrokerPurgeResponse = await backend.purge(body);
 			return json(response);
 		}
 		if (request.method === "POST" && pathname === "/blob") {

@@ -692,8 +692,8 @@ export const BUILTIN_BLOB_DESTINATIONS = {
 		family: "tunnel",
 		status: "available",
 		directImage: true,
-		options: [{ key: "host", label: "Local host", type: "string", default: "127.0.0.1" }],
-		credentials: [{ key: "sshKey", label: "SSH private key", secret: true }],
+		options: noFields,
+		credentials: noFields,
 	},
 	pinggy: {
 		id: "pinggy",
@@ -701,8 +701,8 @@ export const BUILTIN_BLOB_DESTINATIONS = {
 		family: "tunnel",
 		status: "available",
 		directImage: true,
-		options: noFields,
-		credentials: [{ key: "token", label: "Token", secret: true }],
+		options: [{ key: "publicBaseUrl", label: "Stable public base URL", type: "string" }],
+		credentials: [{ key: "token", label: "Pro token", secret: true }],
 	},
 	devtunnel: {
 		id: "devtunnel",
@@ -710,8 +710,9 @@ export const BUILTIN_BLOB_DESTINATIONS = {
 		family: "tunnel",
 		status: "requires-account",
 		directImage: true,
+		reason: "The devtunnel CLI must be logged in locally.",
 		options: noFields,
-		credentials: [{ key: "accessToken", label: "Access token", required: true, secret: true }],
+		credentials: noFields,
 	},
 	zrok: {
 		id: "zrok",
@@ -719,8 +720,9 @@ export const BUILTIN_BLOB_DESTINATIONS = {
 		family: "tunnel",
 		status: "requires-account",
 		directImage: true,
+		reason: "The local zrok environment must be enabled.",
 		options: noFields,
-		credentials: [{ key: "enableToken", label: "Enable token", required: true, secret: true }],
+		credentials: noFields,
 	},
 	bore: {
 		id: "bore",
@@ -728,7 +730,7 @@ export const BUILTIN_BLOB_DESTINATIONS = {
 		family: "tunnel",
 		status: "available",
 		directImage: true,
-		options: [{ key: "server", label: "Bore server", type: "string", required: true }],
+		options: [{ key: "server", label: "Bore server", type: "string", default: "bore.pub" }],
 		credentials: [{ key: "secret", label: "Authentication secret", secret: true }],
 	},
 	"named-cloudflared": {
@@ -738,10 +740,11 @@ export const BUILTIN_BLOB_DESTINATIONS = {
 		status: "requires-account",
 		directImage: true,
 		options: [
-			{ key: "tunnelId", label: "Tunnel ID", type: "string", required: true },
-			{ key: "hostname", label: "Public hostname", type: "string", required: true },
+			{ key: "publicBaseUrl", label: "Public base URL", type: "string", required: true },
+			{ key: "configFile", label: "Cloudflared config file", type: "string" },
+			{ key: "tunnelName", label: "Tunnel name or UUID", type: "string" },
 		],
-		credentials: [{ key: "tunnelToken", label: "Tunnel token", required: true, secret: true }],
+		credentials: [{ key: "tunnelToken", label: "Tunnel token", secret: true }],
 	},
 	r2: {
 		id: "r2",

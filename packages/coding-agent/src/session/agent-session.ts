@@ -4824,9 +4824,9 @@ export class AgentSession {
 		return this.#maintenance.compact(customInstructions, options);
 	}
 
-	/** Cancel active manual, automatic, and handoff maintenance. */
-	abortCompaction(): void {
-		this.#maintenance.abortCompaction();
+	/** Cancel active manual, automatic, and handoff maintenance, preserving an optional source reason. */
+	abortCompaction(reason?: unknown): void {
+		void this.#maintenance.abortCompaction(reason);
 	}
 
 	/** Trigger idle compaction through the automatic maintenance flow. */
@@ -4957,6 +4957,11 @@ export class AgentSession {
 	/** Scoped models for cycling (from --models flag) */
 	get scopedModels(): ReadonlyArray<{ model: Model; thinkingLevel?: ThinkingLevel }> {
 		return this.#models.scopedModels;
+	}
+
+	/** Replace the Ctrl+P/`/models` cycle scope (post-discovery rebuild; see {@link ModelControls.setScopedModels}). */
+	setScopedModels(scopedModels: Array<{ model: Model; thinkingLevel?: ThinkingLevel }>): void {
+		this.#models.setScopedModels(scopedModels);
 	}
 
 	/** Prompt templates */
@@ -5437,6 +5442,12 @@ export class AgentSession {
 	 * the ACP agent) use this to know whether to expect an `agent_end` event.
 	 */
 	async prompt(text: string, options?: PromptOptions): Promise<boolean> {
+		// A manual `/compact` runs with the agent subscription disconnected until its
+		// cleanup finally re-drains the preserved queues. Starting a turn before then
+		// would neither persist nor forward its events and could race the in-flight
+		// history rewrite. `abort` still overtakes compaction; ordinary prompts wait
+		// here. No-op when no manual compaction is active.
+		await this.#maintenance.manualCompactionCleanup;
 		const expandPromptTemplates = options?.expandPromptTemplates ?? true;
 		// Slash/custom-command handling below rewrites `text`; keep the original
 		// so a dropped prompt is handed back exactly as the user typed it.
@@ -6820,6 +6831,7 @@ export class AgentSession {
 			// Abort the handoff first so generic compaction cancellation cannot replace
 			// the harness reason with an unreasoned "Handoff cancelled".
 			this.#handoff.abortHandoff(new Error(options?.reason ?? "Handoff aborted by session"));
+			let manualCompactionCleanup: Promise<void> | undefined;
 			if (options?.preserveCompaction) {
 				// Manual `/compact` installed its own #compactionAbortController before
 				// this internal abort and must keep it alive (that marker is what makes
@@ -6829,7 +6841,7 @@ export class AgentSession {
 				// appendCompaction/replaceMessages, double-rewriting session history.
 				this.#maintenance.abortAutomaticCompaction();
 			} else {
-				this.abortCompaction();
+				manualCompactionCleanup = this.#maintenance.abortCompaction(options?.reason);
 			}
 			this.abortBash();
 			this.abortEval();
@@ -6837,6 +6849,10 @@ export class AgentSession {
 			this.agent.abort(options?.reason);
 			await postPromptDrain;
 			await this.agent.waitForIdle();
+			// `/compact` disconnects the agent subscription until its finally block.
+			// Do not let abort-and-replace callers start a new prompt before that cleanup
+			// finishes, or the replacement turn's events are neither forwarded nor persisted.
+			await manualCompactionCleanup;
 			await this.#drainAutolearnCapture();
 			await this.#goalRuntime.onTaskAborted({ reason: options?.goalReason ?? "interrupted" });
 			// Clear prompt-in-flight state: waitForIdle resolves when the agent loop's finally

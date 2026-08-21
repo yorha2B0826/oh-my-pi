@@ -11,9 +11,21 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { $which, logger } from "@oh-my-pi/pi-utils";
+import { credentialString, type DestinationRuntimeConfig, optionString } from "./uploader-runtime";
 
 /** User-selectable exposure strategy. */
-export type ExposureKind = "cloudflared" | "ngrok" | "tailscale" | "ssh" | "direct";
+export type ExposureKind =
+	| "cloudflared"
+	| "ngrok"
+	| "tailscale"
+	| "ssh"
+	| "direct"
+	| "localhost-run"
+	| "pinggy"
+	| "devtunnel"
+	| "zrok"
+	| "bore"
+	| "named-cloudflared";
 
 export interface ExposureConfig {
 	kind: ExposureKind;
@@ -29,6 +41,10 @@ export interface ExposureConfig {
 	sshTarget?: string;
 	/** Remote listen port of the ssh reverse forward. */
 	sshRemotePort?: number;
+	/** Destination-specific non-secret tunnel settings. */
+	options: DestinationRuntimeConfig["options"];
+	/** Destination credentials. Values must never be included in logs or errors. */
+	credentials: DestinationRuntimeConfig["credentials"];
 }
 
 /** Live exposure of one local port. */
@@ -42,6 +58,24 @@ export interface ActiveExposure {
 }
 
 const READY_TIMEOUT_MS = 30_000;
+const HEALTH_PATH = "/.well-known/omp-blob-health";
+const DEFAULT_HEALTH_ATTEMPTS = 5;
+const MAX_HEALTH_ATTEMPTS = 10;
+const DEFAULT_HEALTH_BACKOFF_MS = 250;
+const MAX_HEALTH_BACKOFF_MS = 5_000;
+const DEFAULT_HEALTH_TIMEOUT_MS = 3_000;
+const MAX_HEALTH_TIMEOUT_MS = 30_000;
+
+/** Retry and timeout limits for an exposure edge-to-origin health probe. */
+export interface ExposureHealthProbeOptions {
+	/** Maximum fetch attempts before the exposure is rejected. */
+	attempts?: number;
+	/** Delay between attempts, in milliseconds. */
+	backoffMs?: number;
+	/** Per-attempt fetch timeout, in milliseconds. */
+	timeoutMs?: number;
+}
+
 /** ssh prints nothing on success; alive past this grace period means forwarded. */
 const SSH_READY_GRACE_MS = 1_500;
 
@@ -68,6 +102,51 @@ export function parseTailscaleUrl(line: string): string | null {
 	return match ? match[0].replace(/\/+$/, "") : null;
 }
 
+/** Registered localhost.run TLS origin from its JSON or text output. */
+export function parseLocalhostRunUrl(line: string): string | null {
+	if (line.includes('"domain"')) {
+		try {
+			const parsed = JSON.parse(line) as { type?: string; domain?: string };
+			if (
+				parsed.type === "registered" &&
+				typeof parsed.domain === "string" &&
+				/^[a-z0-9-]+\.(?:lhr\.life|lhr\.rocks|localhost\.run)$/i.test(parsed.domain)
+			) {
+				return `https://${parsed.domain.toLowerCase()}`;
+			}
+		} catch {
+			// localhost.run may interleave its JSON events with SSH diagnostics.
+		}
+	}
+	return /https:\/\/[a-z0-9-]+\.(?:lhr\.life|lhr\.rocks|localhost\.run)/i.exec(line)?.[0] ?? null;
+}
+
+/** Public HTTPS origin printed by Pinggy's SSH endpoint. */
+export function parsePinggyUrl(line: string): string | null {
+	return (
+		/https:\/\/[a-z0-9-]+\.(?:a\.pinggy\.link|free\.pinggy\.link|pinggy\.link|pinggy\.online)/i.exec(line)?.[0] ??
+		null
+	);
+}
+
+/** Public HTTPS origin printed by `devtunnel host`. */
+export function parseDevtunnelUrl(line: string): string | null {
+	return /https:\/\/[a-z0-9-]+-\d+\.[a-z0-9.-]+\.devtunnels\.ms/i.exec(line)?.[0] ?? null;
+}
+
+/** Public frontend origin printed by `zrok share public`. */
+export function parseZrokUrl(line: string): string | null {
+	return /https:\/\/[a-z0-9-]+\.share\.zrok\.io/i.exec(line)?.[0] ?? null;
+}
+
+/** HTTP origin constructed from the host and port reported by `bore local`. */
+export function parseBoreUrl(line: string, fallbackHost?: string): string | null {
+	const match = /listening at (?:(?<host>[a-z0-9.-]+):)?(?<port>\d+)/i.exec(line);
+	const host = match?.groups?.host ?? fallbackHost;
+	const port = match?.groups?.port;
+	return host && port ? `http://${host}:${port}` : null;
+}
+
 function requireBinary(name: string): string {
 	const path = $which(name);
 	if (!path) {
@@ -78,6 +157,53 @@ function requireBinary(name: string): string {
 
 function normalizeBaseUrl(url: string): string {
 	return url.replace(/\/+$/, "");
+}
+
+function boundedInteger(value: number | undefined, fallback: number, maximum: number): number {
+	if (value === undefined || !Number.isFinite(value)) return fallback;
+	return Math.min(maximum, Math.max(0, Math.floor(value)));
+}
+
+/**
+ * Verify that a public exposure reaches the local blob origin.
+ *
+ * Each request is cache-busted and time-bounded. Only the broker health
+ * endpoint's exact 204 response is accepted; errors expose only the sanitized
+ * destination origin and final status.
+ */
+export async function probeExposureHealth(
+	baseUrl: string,
+	fetchFn: typeof globalThis.fetch = globalThis.fetch,
+	options: ExposureHealthProbeOptions = {},
+): Promise<void> {
+	const attempts = Math.max(1, boundedInteger(options.attempts, DEFAULT_HEALTH_ATTEMPTS, MAX_HEALTH_ATTEMPTS));
+	const backoffMs = boundedInteger(options.backoffMs, DEFAULT_HEALTH_BACKOFF_MS, MAX_HEALTH_BACKOFF_MS);
+	const timeoutMs = Math.max(1, boundedInteger(options.timeoutMs, DEFAULT_HEALTH_TIMEOUT_MS, MAX_HEALTH_TIMEOUT_MS));
+	const healthUrl = new URL(HEALTH_PATH, `${normalizeBaseUrl(baseUrl)}/`);
+	const destination = healthUrl.origin;
+	let finalStatus = "request failed";
+
+	for (let attempt = 0; attempt < attempts; attempt++) {
+		healthUrl.searchParams.set("nonce", `${Date.now().toString(36)}-${attempt.toString(36)}`);
+		try {
+			const response = await fetchFn(healthUrl, {
+				cache: "no-store",
+				signal: AbortSignal.timeout(timeoutMs),
+			});
+			if (response.status === 204) return;
+			finalStatus = `HTTP ${response.status}`;
+			try {
+				await response.body?.cancel();
+			} catch {
+				// The response status is authoritative even if body disposal fails.
+			}
+		} catch (error) {
+			finalStatus = error instanceof DOMException && error.name === "TimeoutError" ? "timeout" : "request failed";
+		}
+		if (attempt + 1 < attempts && backoffMs > 0) await Bun.sleep(backoffMs);
+	}
+
+	throw new Error(`Exposure health probe for ${destination} failed with status ${finalStatus}`);
 }
 
 /**
@@ -113,7 +239,7 @@ async function spawnUrlTunnel(
 	const fd = fs.openSync(logPath, "w");
 	let proc: Bun.Subprocess;
 	try {
-		proc = Bun.spawn(argv, { stdin: "ignore", stdout: fd, stderr: fd });
+		proc = Bun.spawn(argv, { env: process.env, stdin: "ignore", stdout: fd, stderr: fd });
 	} finally {
 		fs.closeSync(fd);
 	}
@@ -165,6 +291,45 @@ function processExposure(kind: ExposureKind, baseUrl: string, proc: Bun.Subproce
 }
 
 /**
+ * Keep an authenticated Pinggy tunnel behind its configured stable hostname.
+ * Random-hostname modes deliberately return their child exit to the broker:
+ * restarting those would silently invalidate every already-published URL.
+ */
+function restartingPinggyExposure(baseUrl: string, argv: string[], initialProc: Bun.Subprocess): ActiveExposure {
+	let proc = initialProc;
+	let stopping = false;
+	proc.unref();
+	const exited = (async () => {
+		while (true) {
+			await proc.exited;
+			if (stopping) return;
+			try {
+				const restarted = await spawnUrlTunnel(argv, parsePinggyUrl);
+				if (stopping) {
+					killTunnelProcess(restarted.proc);
+					await restarted.proc.exited;
+					return;
+				}
+				proc = restarted.proc;
+				proc.unref();
+			} catch {
+				logger.warn("blob-broker: authenticated Pinggy tunnel failed to reconnect");
+				return;
+			}
+		}
+	})();
+	return {
+		kind: "pinggy",
+		baseUrl,
+		exited,
+		stop: () => {
+			stopping = true;
+			killTunnelProcess(proc);
+		},
+	};
+}
+
+/**
  * Expose `port` per `config`. Throws when the backend is missing,
  * misconfigured, or fails to come up; the caller degrades to inline base64.
  */
@@ -196,6 +361,125 @@ export async function startExposure(config: ExposureConfig, port: number): Promi
 			const { proc, baseUrl } = await spawnUrlTunnel([binary, "funnel", String(port)], parseTailscaleUrl);
 			return processExposure("tailscale", baseUrl, proc);
 		}
+		case "localhost-run": {
+			const binary = requireBinary("ssh");
+			const { proc, baseUrl } = await spawnUrlTunnel(
+				[
+					binary,
+					"-o",
+					"BatchMode=yes",
+					"-o",
+					"StrictHostKeyChecking=accept-new",
+					"-o",
+					"ServerAliveInterval=30",
+					"-o",
+					"ServerAliveCountMax=3",
+					"-o",
+					"ExitOnForwardFailure=yes",
+					"-R",
+					`80:127.0.0.1:${port}`,
+					"nokey@localhost.run",
+					"--",
+					"--output",
+					"json",
+				],
+				parseLocalhostRunUrl,
+			);
+			return processExposure("localhost-run", baseUrl, proc);
+		}
+		case "pinggy": {
+			const binary = requireBinary("ssh");
+			const token = credentialString(config, "token");
+			const argv = token
+				? [
+						binary,
+						"-p",
+						"443",
+						"-o",
+						"BatchMode=yes",
+						"-o",
+						"StrictHostKeyChecking=accept-new",
+						"-R",
+						`0:127.0.0.1:${port}`,
+						`${token}@pro.pinggy.io`,
+					]
+				: [
+						binary,
+						"-p",
+						"443",
+						"-o",
+						"BatchMode=yes",
+						"-o",
+						"StrictHostKeyChecking=accept-new",
+						"-o",
+						"ServerAliveInterval=30",
+						"-o",
+						"ServerAliveCountMax=3",
+						"-o",
+						"ExitOnForwardFailure=yes",
+						"-R",
+						`0:127.0.0.1:${port}`,
+						"free.pinggy.io",
+					];
+			const { proc, baseUrl } = await spawnUrlTunnel(argv, parsePinggyUrl);
+			if (token && config.publicBaseUrl) {
+				return restartingPinggyExposure(normalizeBaseUrl(config.publicBaseUrl), argv, proc);
+			}
+			return processExposure("pinggy", baseUrl, proc);
+		}
+		case "devtunnel": {
+			const binary = requireBinary("devtunnel");
+			const { proc, baseUrl } = await spawnUrlTunnel(
+				[binary, "host", "-p", String(port), "--allow-anonymous", "--protocol", "http"],
+				parseDevtunnelUrl,
+			);
+			return processExposure("devtunnel", baseUrl, proc);
+		}
+		case "zrok": {
+			const binary = requireBinary("zrok");
+			const { proc, baseUrl } = await spawnUrlTunnel(
+				[binary, "share", "public", `http://127.0.0.1:${port}`, "--headless", "--backend-mode", "proxy"],
+				parseZrokUrl,
+			);
+			return processExposure("zrok", baseUrl, proc);
+		}
+		case "bore": {
+			const binary = requireBinary("bore");
+			const server = optionString(config, "server", "bore.pub");
+			if (!server) throw new Error('imageUrls exposure "bore" requires options.server');
+			const secret = credentialString(config, "secret");
+			const argv = [binary, "local", String(port), "--to", server];
+			if (secret) argv.push("--secret", secret);
+			const { proc, baseUrl } = await spawnUrlTunnel(argv, line => parseBoreUrl(line, server));
+			return processExposure("bore", baseUrl, proc);
+		}
+		case "named-cloudflared": {
+			if (!config.publicBaseUrl) {
+				throw new Error('imageUrls exposure "named-cloudflared" requires imageUrls.publicBaseUrl');
+			}
+			const binary = requireBinary("cloudflared");
+			const token = credentialString(config, "tunnelToken");
+			let argv: string[];
+			if (token) {
+				argv = [binary, "tunnel", "--no-autoupdate", "run", "--token", token];
+			} else {
+				const configFile = optionString(config, "configFile");
+				const tunnelName = optionString(config, "tunnelName");
+				if (!configFile || !tunnelName) {
+					throw new Error(
+						'imageUrls exposure "named-cloudflared" requires credentials.tunnelToken or options.configFile and options.tunnelName',
+					);
+				}
+				argv = [binary, "tunnel", "--no-autoupdate", "--config", configFile, "run", tunnelName];
+			}
+			const baseUrl = normalizeBaseUrl(config.publicBaseUrl);
+			const { proc } = await spawnUrlTunnel(
+				argv,
+				() => baseUrl,
+				/Registered tunnel connection|Connection [a-z0-9-]+ registered/i,
+			);
+			return processExposure("named-cloudflared", baseUrl, proc);
+		}
 		case "ssh": {
 			if (!config.publicBaseUrl) throw new Error('imageUrls exposure "ssh" requires imageUrls.publicBaseUrl');
 			if (!config.sshTarget) throw new Error('imageUrls exposure "ssh" requires imageUrls.sshTarget');
@@ -213,7 +497,7 @@ export async function startExposure(config: ExposureConfig, port: number): Promi
 					`${remotePort}:127.0.0.1:${port}`,
 					config.sshTarget,
 				],
-				{ stdin: "ignore", stdout: "ignore", stderr: "ignore" },
+				{ env: process.env, stdin: "ignore", stdout: "ignore", stderr: "ignore" },
 			);
 			const early = await Promise.race([
 				proc.exited.then(code => code),

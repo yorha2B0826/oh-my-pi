@@ -667,6 +667,12 @@ function parseOperations(input: string, content: string): Operation[] {
 				`${trimmed} is not a valid opener. Use ${OPENER} with a pattern that matches once — add context only the intended match has — or ${OPENER}* to change every match.`,
 			);
 		}
+		if (trimmed === `${OPENER}${REWRITE_HEADER}`) {
+			// A glued «» line: after MATCH content it is a mistyped » separator;
+			// anywhere else it is a stray operation terminator to drop.
+			if (state === "pattern" && patternLines.some(entry => entry.trim() !== "")) state = "rewrite";
+			continue;
+		}
 		if (
 			parsedOpener === false &&
 			(trimmed.startsWith(OPENER) ||

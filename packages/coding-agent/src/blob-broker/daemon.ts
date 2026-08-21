@@ -22,7 +22,13 @@ import {
 	BLOB_BROKER_READY_PATTERN,
 	BLOB_BROKER_SOCKET_ENV,
 	BLOB_BROKER_WORKER_ARG,
+	type BlobBrokerDoctorRequest,
+	type BlobBrokerDoctorResponse,
 	type BlobBrokerInfo,
+	type BlobBrokerProbeRequest,
+	type BlobBrokerProbeResponse,
+	type BlobBrokerPurgeRequest,
+	type BlobBrokerPurgeResponse,
 	type BlobBrokerStatus,
 	type BlobBrokerWorkerConfig,
 	blobBrokerEndpoint,
@@ -64,6 +70,70 @@ async function probeDaemon(socket: string): Promise<DaemonInfo | null> {
 	} catch {
 		return null;
 	}
+}
+
+async function liveBlobBrokerSocket(projectDir: string): Promise<string | null> {
+	if (process.platform === "win32") return null;
+	try {
+		const client = await daemonClientForProject(projectDir);
+		await client.request({ op: "ping" });
+		const socket = blobBrokerEndpoint(daemonRuntimeDir(client.projectDir));
+		return (await probeDaemon(socket)) ? socket : null;
+	} catch {
+		return null;
+	}
+}
+
+/** Query a running blob daemon without starting one; `null` means stopped. */
+export async function queryBlobBrokerStatus(projectDir: string): Promise<BlobBrokerStatus | null> {
+	const socket = await liveBlobBrokerSocket(projectDir);
+	return socket ? fetchUnix<BlobBrokerStatus>(socket, "/status") : null;
+}
+
+/** Run diagnostics on a running blob daemon; `null` means stopped. */
+export async function queryBlobBrokerDoctor(
+	projectDir: string,
+	request: BlobBrokerDoctorRequest = {},
+): Promise<BlobBrokerDoctorResponse | null> {
+	const socket = await liveBlobBrokerSocket(projectDir);
+	if (!socket) return null;
+	return fetchUnix<BlobBrokerDoctorResponse>(socket, "/doctor", {
+		method: "POST",
+		body: JSON.stringify(request),
+	});
+}
+
+/**
+ * Ensure the configured daemon is active, then issue an actual public health
+ * request through its exposure. `null` means the daemon could not be started.
+ */
+export async function queryBlobBrokerProbe(
+	projectDir: string,
+	config: BlobBrokerWorkerConfig,
+	request: BlobBrokerProbeRequest = {},
+): Promise<BlobBrokerProbeResponse | null> {
+	if (process.platform === "win32") return null;
+	const info = await ensureBlobDaemon(projectDir, config);
+	if (!info) return null;
+	const socket = await liveBlobBrokerSocket(projectDir);
+	if (!socket) return null;
+	return fetchUnix<BlobBrokerProbeResponse>(socket, "/probe", {
+		method: "POST",
+		body: JSON.stringify(request),
+	});
+}
+
+/** Preview or apply cleanup on a running daemon; `null` means stopped. */
+export async function queryBlobBrokerPurge(
+	projectDir: string,
+	request: BlobBrokerPurgeRequest = {},
+): Promise<BlobBrokerPurgeResponse | null> {
+	const socket = await liveBlobBrokerSocket(projectDir);
+	if (!socket) return null;
+	return fetchUnix<BlobBrokerPurgeResponse>(socket, "/purge", {
+		method: "POST",
+		body: JSON.stringify(request),
+	});
 }
 
 /**

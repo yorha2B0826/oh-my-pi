@@ -2,14 +2,14 @@ import type { Context, ImageContent, Model } from "@oh-my-pi/pi-ai";
 import { logger } from "@oh-my-pi/pi-utils";
 import { contextHasImages, decorateContextProviderFiles } from "./context-images";
 import {
-	ProviderFileCache,
 	hashProviderFileContent,
 	hashProviderFileCredential,
-	toProviderFileReference,
+	type ProviderFileCache,
 	type ProviderFileCacheEntry,
 	type ProviderFileCacheStatus,
 	type ProviderFileClient,
 	type ProviderFileHandle,
+	toProviderFileReference,
 } from "./provider-file-types";
 import { createAnthropicFileClient } from "./provider-files-anthropic";
 import { createGeminiProviderFileClient } from "./provider-files-gemini";
@@ -27,17 +27,15 @@ const DEFAULT_CLIENT_FACTORIES: readonly ProviderFileClientFactory[] = [
 	createOpenAIFileClient,
 ];
 
-type ImageBearingRole = "user" | "developer" | "toolResult";
-const IMAGE_BEARING_ROLES: Readonly<Record<ImageBearingRole, true>> = {
-	user: true,
-	developer: true,
-	toolResult: true,
-};
-
 function imageBlocks(context: Context): ImageContent[] {
 	const blocks: ImageContent[] = [];
 	for (const message of context.messages) {
-		if (!(message.role in IMAGE_BEARING_ROLES) || !Array.isArray(message.content)) continue;
+		if (
+			(message.role !== "user" && message.role !== "developer" && message.role !== "toolResult") ||
+			!Array.isArray(message.content)
+		) {
+			continue;
+		}
 		for (const block of message.content) {
 			if (block.type === "image") blocks.push(block);
 		}
@@ -93,7 +91,16 @@ export class ProviderFileManager {
 			return context;
 		}
 		if (!credential) return context;
-		const client = this.#clientFor(model, credential);
+		let client: ProviderFileClient | null;
+		try {
+			client = this.#clientFor(model, credential);
+		} catch (error) {
+			logger.warn("blob-broker: provider-file client unavailable; trying next image backend", {
+				provider: model.provider,
+				error: error instanceof Error ? error.message : String(error),
+			});
+			return context;
+		}
 		if (!client) return context;
 		const candidates = images.filter(
 			block => !block.url && block.data.length > 0 && block.providerFile?.provider !== client.provider,

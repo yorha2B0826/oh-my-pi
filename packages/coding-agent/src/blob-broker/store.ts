@@ -462,25 +462,39 @@ export class BlobRegistry {
 		return { metrics, recentFetches: [...this.#recentFetches] };
 	}
 
-	/** Remove registrations selected by a purge request and return cleanup metadata. */
-	purge(request: BlobBrokerPurgeRequest = {}): BlobBrokerPurgeResponse {
+	/**
+	 * Select registrations for cleanup and, only when `apply` is true, remove
+	 * candidates accepted by `canRemove`. An unscoped request defaults to
+	 * expired registrations; callers must set `all` to select live entries.
+	 */
+	purge(
+		request: BlobBrokerPurgeRequest = {},
+		canRemove: (publication: BlobPublication | undefined) => boolean = () => true,
+	): BlobBrokerPurgeResponse {
 		const publications: BlobPublication[] = [];
+		const apply = request.apply === true;
+		const expiredOnly = request.expiredOnly === true || (!request.all && request.before === undefined);
 		let purgedBlobs = 0;
 		let reclaimedBytes = 0;
 		for (const entry of [...this.#entries.values()]) {
-			if (request.expiredOnly && !this.#expired(entry)) continue;
+			if (expiredOnly && !this.#expired(entry)) continue;
 			if (request.before !== undefined && entry.touchedAt >= request.before) continue;
+			if (entry.publication) publications.push(entry.publication);
+			if (apply && !canRemove(entry.publication)) continue;
 			purgedBlobs++;
 			reclaimedBytes += entry.bytes?.byteLength ?? (entry.sha ? entry.bytesCount : 0);
-			if (entry.publication) publications.push(entry.publication);
-			this.#drop(entry);
+			if (apply) this.#drop(entry);
 		}
-		if (purgedBlobs > 0) this.#scheduleSave();
+		if (apply && purgedBlobs > 0) this.#scheduleSave();
 		return {
+			applied: apply,
 			purgedBlobs,
 			reclaimedBytes,
 			publications,
 			remoteDeletes: publications.flatMap(publication => (publication.delete ? [publication.delete] : [])),
+			attempted: 0,
+			deleted: 0,
+			errors: [],
 		};
 	}
 

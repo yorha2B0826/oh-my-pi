@@ -10,6 +10,7 @@
 import * as path from "node:path";
 import type { BlobDestinationId } from "./destinations";
 import type { BlobPublication, RemoteDeleteAction } from "./publication";
+import type { BlobBrokerSavingsStatus } from "./savings";
 import type { DestinationRuntimeConfig } from "./uploader-runtime";
 
 /** Hidden CLI selector used to re-enter the blob broker worker. */
@@ -52,6 +53,7 @@ export interface BlobBrokerWorkerConfig {
 	persist?: {
 		blobsDir: string;
 		indexPath: string;
+		savingsPath: string;
 		ttlMs: number;
 	};
 }
@@ -148,6 +150,8 @@ export interface BlobStoreStatus {
 export interface BlobBrokerStatus extends BlobBrokerInfo, BlobStoreStatus {
 	/** Stable hash of the worker configuration. */
 	configKey: string;
+	/** Aggregate inline-versus-reference bytes recorded for this project. */
+	savings: BlobBrokerSavingsStatus;
 }
 
 /** One diagnostic check emitted by a doctor request. */
@@ -156,13 +160,15 @@ export interface BlobBrokerDoctorCheck {
 	name: string;
 	/** Whether the check succeeded. */
 	ok: boolean;
+	/** Severity used by the CLI to distinguish warnings from hard failures. */
+	status: "pass" | "warn" | "fail";
 	/** Human-readable result detail. */
 	detail: string;
 }
 
-/** `POST /doctor` request selecting optional active checks. */
+/** `POST /doctor` request selecting active checks. */
 export interface BlobBrokerDoctorRequest {
-	/** Include a live destination connectivity check. */
+	/** Include a live public health request; defaults to `true`. */
 	probe?: boolean;
 }
 
@@ -174,22 +180,28 @@ export interface BlobBrokerDoctorResponse {
 	checks: readonly BlobBrokerDoctorCheck[];
 }
 
-/** `POST /probe` request for a content-key registration. */
+/** `POST /probe` request for the configured destination's public health endpoint. */
 export interface BlobBrokerProbeRequest {
-	/** Stable caller-computed content key. */
-	key: string;
+	/** Per-attempt public request timeout in milliseconds. */
+	timeoutMs?: number;
 }
 
-/** `POST /probe` response for a content-key registration. */
+/** `POST /probe` response from an actual public health request. */
 export interface BlobBrokerProbeResponse {
-	/** Whether the key has a live publication. */
-	found: boolean;
-	/** Durable publication when the key is registered. */
-	publication?: BlobPublication;
+	/** Whether the public health endpoint answered successfully. */
+	ok: boolean;
+	/** Elapsed wall-clock time for the health request. */
+	durationMs: number;
+	/** Non-secret diagnostic result. */
+	detail: string;
 }
 
 /** `POST /purge` request selecting registrations to remove. */
 export interface BlobBrokerPurgeRequest {
+	/** Execute remote deletion requests and remove registrations. Defaults to dry-run. */
+	apply?: boolean;
+	/** Explicitly select every registration instead of the safe expired-only default. */
+	all?: boolean;
 	/** Remove only entries whose serving windows have expired. */
 	expiredOnly?: boolean;
 	/** Remove entries last registered before this Unix epoch millisecond. */
@@ -198,14 +210,22 @@ export interface BlobBrokerPurgeRequest {
 
 /** `POST /purge` response describing removed registrations. */
 export interface BlobBrokerPurgeResponse {
-	/** Number of registrations removed from the index. */
+	/** Whether this request performed mutations. */
+	applied: boolean;
+	/** Number of registrations selected (dry-run) or removed (apply). */
 	purgedBlobs: number;
-	/** Resident and disk bytes no longer referenced by removed registrations. */
+	/** Resident and disk bytes selected (dry-run) or no longer referenced (apply). */
 	reclaimedBytes: number;
 	/** Publications carrying any remote cleanup metadata needed by callers. */
 	publications: readonly BlobPublication[];
-	/** Replayable remote deletions extracted from removed publications. */
+	/** Replayable remote deletions extracted from selected publications. */
 	remoteDeletes: readonly RemoteDeleteAction[];
+	/** Number of remote deletion requests attempted. */
+	attempted: number;
+	/** Number of remote deletion requests that succeeded. */
+	deleted: number;
+	/** Redacted remote deletion failures. */
+	errors: readonly string[];
 }
 
 /** Path prefix of the session-side render callback server. */

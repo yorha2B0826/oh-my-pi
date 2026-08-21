@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [17.4.2] - 2026-08-21
+
+### Added
+
+- Editor atom table: `insertAtom`/`registerAtom` stage compact atomic tokens whose registered expansion is emitted on submit (`getExpandedText`), alongside the existing paste-marker store.
+
 ## [17.4.1] - 2026-08-21
 
 ### Added

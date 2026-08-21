@@ -75,6 +75,22 @@ describe("sloppy v8", () => {
 		expect(variant.apply(content, input, context)).toBe("before();\nconst moved = createMoved();\nafter();\n");
 	});
 
+	test("ignores a stray glued open+separator terminator after an explicit empty rewrite", () => {
+		const content = ["const keep = 1;", "function helper() {", "  return 2;", "}", ""].join("\n");
+		const input = ["function helper() {", "  return 2;", "}"].join("\n");
+
+		expect(variant.apply(content, `${M.open}\n${input}\n${M.put}\n${M.open}${M.put}`, context)).toBe(
+			"const keep = 1;\n",
+		);
+	});
+
+	test("treats a glued open+separator after MATCH as the mistyped rewrite separator", () => {
+		const content = "const value = oldValue;\n";
+		const input = [M.open, "const value = oldValue;", `${M.open}${M.put}`, "const value = nextValue;"].join("\n");
+
+		expect(variant.apply(content, input, context)).toBe("const value = nextValue;\n");
+	});
+
 	test("ignores a stray ⟫ terminator after the mistyped ⟫ separator", () => {
 		const content = [
 			"    } else if (contextPercentValue > 70) {",

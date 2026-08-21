@@ -156,6 +156,7 @@ import {
 	VibeSessionRegistry,
 } from "../vibe/runtime";
 import type { AssistantMessageComponent } from "./components/assistant-message";
+import { AttachmentChipsBand } from "./components/attachment-chips";
 import type { BashExecutionComponent } from "./components/bash-execution";
 import { ChatBlock, type ChatBlockHost } from "./components/chat-block";
 import { CodexResetFireworksController } from "./components/codex-reset-fireworks";
@@ -185,6 +186,7 @@ import { SessionFocusController } from "./controllers/session-focus-controller";
 import { SSHCommandController } from "./controllers/ssh-command-controller";
 import { TanCommandController } from "./controllers/tan-command-controller";
 import { TodoCommandController } from "./controllers/todo-command-controller";
+import { materializeImageReferenceLinks } from "./image-references";
 import {
 	consumeLoopLimitIteration,
 	createLoopLimitRuntime,
@@ -537,6 +539,8 @@ export class InteractiveMode implements InteractiveModeContext {
 	deferredCommandContainer: Container;
 	editor: CustomEditor;
 	editorContainer: Container;
+	/** Composer attachment band (chip cards) rendered directly above the prompt box. */
+	attachmentChipsContainer: Container;
 	hookWidgetContainerAbove: Container;
 	hookWidgetContainerBelow: Container;
 	statusLine: StatusLineComponent;
@@ -624,6 +628,8 @@ export class InteractiveMode implements InteractiveModeContext {
 	optimisticSkillMessagePending = false;
 	lastSigintTime = 0;
 	lastEscapeTime = 0;
+	/** Owns Esc for every `/mcp test` that is active or whose cancellation hint may still be visible. */
+	mcpTestEscapeHandlers = new Set<() => void>();
 	lastLeftTapTime = 0;
 	shutdownRequested = false;
 	#isShuttingDown = false;
@@ -856,6 +862,12 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.hookWidgetContainerAbove = new Container();
 		this.hookWidgetContainerAbove.addChild(new Spacer(1));
 		this.hookWidgetContainerBelow = new Container();
+		this.attachmentChipsContainer = new Container();
+		this.attachmentChipsContainer.addChild(new AttachmentChipsBand(this.editor, this.ui.imageBudget));
+		// Restored drafts (esc-esc, /tree, branch) re-materialize blob-store links off the render
+		// path so their chip tokens become clickable again instead of degrading to dead text.
+		this.editor.draftImageLinkMaterializer = images =>
+			materializeImageReferenceLinks(images, this.sessionManager.putBlob.bind(this.sessionManager));
 		this.editorContainer = new Container();
 		this.editorContainer.addChild(this.editor);
 		this.statusLine = new StatusLineComponent(session);
@@ -1097,6 +1109,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		// HUDs, just above the editor's hook-widget top margin — so it reads next to
 		// the prompt while keeping the one-line gap above the editor.
 		this.ui.addChild(this.statusContainer);
+		this.ui.addChild(this.attachmentChipsContainer);
 		this.ui.addChild(this.hookWidgetContainerAbove);
 		this.ui.addChild(this.editorContainer);
 		this.ui.addChild(this.hookWidgetContainerBelow);

@@ -2,10 +2,11 @@ import { describe, expect, it } from "bun:test";
 import type { StreamFn } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, Context, Model } from "@oh-my-pi/pi-ai";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { ImageUrlService } from "@oh-my-pi/pi-coding-agent/blob-broker/service";
 import { wrapStreamFnWithBlobUrlFallback } from "@oh-my-pi/pi-coding-agent/blob-broker/stream-fallback";
 
-const model: Model = {
+const model: Model = buildModel({
 	id: "gpt-4.1",
 	name: "GPT 4.1",
 	api: "openai-responses",
@@ -16,7 +17,7 @@ const model: Model = {
 	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 	contextWindow: 128_000,
 	maxTokens: 4096,
-};
+});
 
 function message(text: string, stopReason: "stop" | "error" = "stop"): AssistantMessage {
 	return {
@@ -63,7 +64,7 @@ function channelOf(context: Context): "native" | "url" | "inline" {
 	const first = context.messages[0];
 	if (!first || !Array.isArray(first.content)) throw new Error("missing image message");
 	const image = first.content.find(part => part.type === "image");
-	if (!image || image.type !== "image") throw new Error("missing image");
+	if (image?.type !== "image") throw new Error("missing image");
 	if (image.providerFile) return "native";
 	return image.url ? "url" : "inline";
 }
