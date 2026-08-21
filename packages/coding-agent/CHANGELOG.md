@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added an opt-in image URL broker (`images.urls.enabled`) that publishes outgoing images through an ordered chain of backends instead of sending inline base64 to URL-fetching providers
+- Added an opt-in image URL broker (`images.urls.enabled`): outgoing images become short unguessable URLs instead of inline base64 for URL-fetching providers, via a selectable exposure — Cloudflare quick tunnel, ngrok, Tailscale Funnel, ssh reverse forward, direct serving, a custom upload command (e.g. `pasta -b -f {file}`), or any ShareX custom-uploader (`.sxcu`) config. The broker runs in the project-shared daemon so every omp process reuses one exposure and one URL per image, snapcompact frames render lazily only when a provider actually fetches them, and requests fall back to inline automatically when the exposure, an upload, or a provider fetch fails. Locally served links live for a limited window (`images.urls.ttlHours`, default 72h) measured from the last time a conversation sent them, are backed by the content-addressed session blob store on disk instead of memory, and survive restarts: resuming a conversation re-registers its images at the same URLs.
+
+### Changed
+
+- Pasted images now insert only the `[Image #N, WxH]` marker; the redundant trailing `attachment://N` URI is no longer added to the composer.
+
 ## [17.4.1] - 2026-08-21
 
 ### Added
@@ -32,6 +41,7 @@
 - Settings menus now support click-to-toggle and drag-to-reorder for list items, as well as warning indicators and risk notes on sensitive options such as External Thinking.
 - Supervised process completion notices now render as compact single-line entries.
 - The todo HUD header now displays a consolidated progress bar showing task completion across all stages.
+
 - `/settings` rows can now carry a risk note: a warning glyph on the row plus a warning-colored line above the description. `External Thinking` (`externalThinking`, `--external-thinking`) is the first user — providers have flagged the request shape it produces as abuse, up to account-level enforcement, so both the settings entry and `--help` now say so.
 
 ### Fixed

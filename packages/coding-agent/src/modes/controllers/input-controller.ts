@@ -1480,13 +1480,14 @@ export class InputController {
 			}
 			return 0;
 		}
-		// Image markers are positional: `[Image #N]` ↔ `pendingImages[N-1]`. Each
-		// queued message numbered its markers against its own local image list
+		// Image markers are positional: `[Image #N]` ↔ `pendingImages[N-1]`
+		// (legacy drafts may still carry a trailing `attachment://N`). Each queued
+		// message numbered its references against its own local image list
 		// (1..K). Because we prepend the queued text but append the queued images
 		// to `pendingImages`, any existing draft images (M of them) — plus images
 		// already pulled in by earlier queued messages — shift the slot index that
-		// every marker must point to. Bumping each message's markers by the
-		// running offset keeps the merged text aligned with the merged
+		// every reference must point to. Bumping each message's marker and URI
+		// indices by the running offset keeps the merged text aligned with the merged
 		// `pendingImages` order; draft markers stay valid because draft images
 		// keep their original positions.
 		const queuedImages = allQueued.flatMap(e => e.images ?? []);
@@ -1507,7 +1508,7 @@ export class InputController {
 		this.ctx.editor.setText(combinedText);
 		// Hand queued images back to the pending-image buffer (links are
 		// re-materialized lazily; the restored text already carries the
-		// renumbered `[Image #N, WxH]` markers).
+		// renumbered `[Image #N, WxH]` references).
 		if (queuedImages.length > 0) {
 			this.ctx.editor.pendingImages.push(...queuedImages);
 			this.ctx.editor.pendingImageLinks.push(...queuedImages.map(() => undefined));

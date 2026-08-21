@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Image content blocks accept an optional `url` mirror: providers whose APIs fetch remote images (Anthropic url sources, OpenAI/xAI Responses and Chat Completions `image_url`, Google `fileData`) send the URL instead of the inline base64 payload.
+
 ## [17.4.1] - 2026-08-21
 
 ### Added

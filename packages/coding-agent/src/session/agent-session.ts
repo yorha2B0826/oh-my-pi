@@ -191,6 +191,7 @@ import {
 } from "../thinking";
 import { isLowSignalTitleInput } from "../tiny/text";
 import { shutdownTinyTitleClient } from "../tiny/title-client";
+import type { ImageAttachmentEntry } from "../tools";
 import { resolveApproval } from "../tools/approval";
 import { type AskToolDetails, type AskToolInput, recoverAskQuestions } from "../tools/ask";
 import { releaseTabsForOwner } from "../tools/browser/tab-supervisor";
@@ -4867,7 +4868,7 @@ export class AgentSession {
 	}
 
 	/** Latest image attachments addressable by tools as `Image #N` or `attachment://N`. */
-	getImageAttachments(): { label: string; uri: string; image: ImageContent }[] {
+	getImageAttachments(): ImageAttachmentEntry[] {
 		return this.#providerBoundary.getImageAttachments();
 	}
 

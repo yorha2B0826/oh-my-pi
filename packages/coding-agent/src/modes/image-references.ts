@@ -8,24 +8,27 @@ import { fileHyperlink } from "../tui/hyperlink";
  *  tail (`, …`) is captured loosely (no `]`/newline) so future label tweaks keep matching. */
 export const PLACEHOLDER_REGEX = /\[(Image|Paste) #([1-9]\d*)(?:,[^\]\n]*)?\]/g;
 
-/** Matches a single `[Image #N]` / `[Image #N, WxH]` marker. Group 1 is the
- *  1-based index, group 2 the optional metadata tail (leading comma, no `]` or
- *  newline) so future label tweaks keep matching. Paste markers are excluded
- *  on purpose: their numbering is owned by the editor's paste store, not by
- *  the pending-image buffer. */
-const IMAGE_MARKER_REGEX = /\[Image #([1-9]\d*)((?:,[^\]\n]*)?)\]/g;
+/** Matches a single `[Image #N]` / `[Image #N, WxH]` marker and its optional
+ *  immediately following `attachment://N` URI (legacy drafts only — new pastes
+ *  insert the bare marker). Groups 1 and 3 are the 1-based
+ *  marker and attachment indices; group 2 is the optional metadata tail
+ *  (leading comma, no `]` or newline). Paste markers are excluded on purpose:
+ *  their numbering is owned by the editor's paste store, not by the
+ *  pending-image buffer. */
+const IMAGE_MARKER_REGEX = /\[Image #([1-9]\d*)((?:,[^\]\n]*)?)\](?: attachment:\/\/(\1))?/g;
 
-/** Renumber every `[Image #N]` marker in `text` by `offset` (added to the
- *  existing index), preserving the optional `, WxH` tail. Paste markers are
- *  left untouched. Used when restoring queued image-messages back into a draft
- *  that already holds pending images so the merged text's positional markers
- *  still line up with `pendingImages`. */
+/** Renumber every `[Image #N]` marker — and, in legacy drafts, its immediately
+ *  following `attachment://N` URI — in `text` by `offset` (added to each existing index),
+ *  preserving the optional `, WxH` tail. Paste markers and unrelated attachment
+ *  URIs are left untouched. Used when restoring queued image-messages back into
+ *  a draft that already holds pending images so the merged text's positional
+ *  references still line up with `pendingImages`. */
 export function shiftImageMarkers(text: string, offset: number): string {
 	if (offset === 0) return text;
-	return text.replace(
-		IMAGE_MARKER_REGEX,
-		(_match, idx: string, tail: string) => `[Image #${Number(idx) + offset}${tail}]`,
-	);
+	return text.replace(IMAGE_MARKER_REGEX, (_match, idx: string, tail: string, attachmentIdx: string | undefined) => {
+		const marker = `[Image #${Number(idx) + offset}${tail}]`;
+		return attachmentIdx === undefined ? marker : `${marker} attachment://${Number(attachmentIdx) + offset}`;
+	});
 }
 
 type ImageBlobWriter = (data: Buffer, options?: { extension?: string }) => Promise<BlobPutResult>;

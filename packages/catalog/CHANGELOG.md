@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added identification of provider-side image fetchers (OpenAI, Anthropic, xAI, Google), so a server hosting images by URL can attribute an inbound fetch to the vendor that issued it.
+
 ## [17.4.1] - 2026-08-21
 
 ### Added

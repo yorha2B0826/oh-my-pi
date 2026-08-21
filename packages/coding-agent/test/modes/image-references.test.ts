@@ -46,17 +46,33 @@ describe("renderPlaceholders", () => {
 		const { refs } = capture("[Paste #1, +30 lines");
 		expect(refs).toHaveLength(0);
 	});
+
+	it("preserves the adjacent attachment URI as plain text", () => {
+		expect(capture("[Image #1, 800x600] attachment://1").out).toBe("<image:1> attachment://1");
+	});
 });
 
 describe("shiftImageMarkers", () => {
 	it("returns text unchanged when the offset is zero", () => {
-		const text = "[Image #1] then [Image #2, 100x100] and [Paste #3, +5 lines]";
+		const text = "[Image #1] attachment://1 then [Image #2, 100x100] attachment://2";
 		expect(shiftImageMarkers(text, 0)).toBe(text);
 	});
 
-	it("renumbers every Image marker by the offset and preserves the WxH tail", () => {
-		expect(shiftImageMarkers("see [Image #1, 800x600] then [Image #2]", 3)).toBe(
-			"see [Image #4, 800x600] then [Image #5]",
+	it("renumbers an image marker and its attachment URI by the offset", () => {
+		expect(shiftImageMarkers("see [Image #1, 800x600] attachment://1", 3)).toBe(
+			"see [Image #4, 800x600] attachment://4",
+		);
+	});
+
+	it("does not shift unrelated attachment URI text", () => {
+		expect(shiftImageMarkers("attachment://1 then [Image #1] attachment://9 and attachment://2", 3)).toBe(
+			"attachment://1 then [Image #4] attachment://9 and attachment://2",
+		);
+	});
+
+	it("shifts multiple image marker and URI pairs exactly once", () => {
+		expect(shiftImageMarkers("[Image #1] attachment://1 then [Image #2, 100x100] attachment://2", 2)).toBe(
+			"[Image #3] attachment://3 then [Image #4, 100x100] attachment://4",
 		);
 	});
 

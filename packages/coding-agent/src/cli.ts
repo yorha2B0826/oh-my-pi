@@ -27,6 +27,7 @@ import {
 import { interceptUnhandledRejections } from "@oh-my-pi/pi-utils/postmortem";
 import { setProcessName } from "@oh-my-pi/pi-utils/process-name";
 import { declareWorkerHostEntry, installWorkerInbox, isWorkerHostSelector } from "@oh-my-pi/pi-utils/worker-host";
+import { BLOB_BROKER_WORKER_ARG } from "./blob-broker/protocol";
 import { installProfileAlias, resolveProfileAliasCommandFromProcess } from "./cli/profile-alias";
 import { extractProfileFlags } from "./cli/profile-bootstrap";
 import { startJsEvalProcess } from "./eval/js/process-entry";
@@ -101,6 +102,7 @@ async function runSmokeTest(): Promise<void> {
 	// Other smoke dependencies stay lazy so normal CLI startup does not load their worker clients.
 	const { smokeTestDaemonBroker } = await import("./launch/client");
 	const { smokeTestLspMux } = await import("./lsp/mux/daemon");
+	const { smokeTestBlobBroker } = await import("./blob-broker/daemon");
 	const { smokeTestTerminalOutputWorker } = await import("./launch/terminal-output-worker-client");
 	await smokeTestSyncWorker();
 
@@ -124,6 +126,7 @@ async function runSmokeTest(): Promise<void> {
 	await smokeTestMnemopiEmbedWorker();
 	await smokeTestDaemonBroker();
 	await smokeTestLspMux();
+	await smokeTestBlobBroker();
 	await smokeTestTerminalOutputWorker();
 	process.stdout.write("smoke-test: ok\n");
 }
@@ -226,6 +229,11 @@ async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
 	if (arg === LSP_MUX_WORKER_ARG) {
 		const { startLspMuxFromEnvironment } = await import("./lsp/mux/server");
 		await startLspMuxFromEnvironment();
+		return true;
+	}
+	if (arg === BLOB_BROKER_WORKER_ARG) {
+		const { startBlobBrokerFromEnvironment } = await import("./blob-broker/server");
+		await startBlobBrokerFromEnvironment();
 		return true;
 	}
 	return false;
