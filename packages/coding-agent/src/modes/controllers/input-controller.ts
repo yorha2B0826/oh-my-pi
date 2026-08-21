@@ -781,7 +781,8 @@ export class InputController {
 			// 的 claim,供应商 /login 的等待流程不受影响。
 			if (text && !text.startsWith("/")) {
 				const manualInput = this.ctx.oauthManualInput;
-				if (manualInput.hasPending() && manualInput.pendingProviderId === IWAN_MANUAL_INPUT_PROVIDER_ID) {
+				// 测试/精简 ctx 可能没有 oauthManualInput;缺字段 = 无等待,直接放行。
+				if (manualInput?.hasPending() && manualInput.pendingProviderId === IWAN_MANUAL_INPUT_PROVIDER_ID) {
 					if (manualInput.submit(text)) {
 						this.ctx.editor.clearDraft();
 						this.ctx.editor.addToHistory(text);
