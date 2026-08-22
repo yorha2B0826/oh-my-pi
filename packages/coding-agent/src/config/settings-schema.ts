@@ -1229,6 +1229,36 @@ export const SETTINGS_SCHEMA = {
 				"Erase and replay terminal scrollback when a block's final form replaces its live preview. When off (default), stale preview copies remain in history and the final content is appended below.",
 		},
 	},
+	"tui.resizeScrollback": {
+		type: "enum",
+		values: ["append", "rebuild", "preserve"] as const,
+		default: "append",
+		ui: {
+			tab: "appearance",
+			group: "Display",
+			label: "Resize Scrollback",
+			description:
+				"How a settled width resize refreshes terminal scrollback when the pane repaints in place (tmux/screen/zellij, or in-place direct terminals). The host rewraps old output naively on resize; these modes decide whether the transcript is re-emitted at the new width.",
+			options: [
+				{
+					value: "append",
+					label: "Append",
+					description: "Replay the transcript at the new width below the old history (one fresh copy per resize)",
+				},
+				{
+					value: "rebuild",
+					label: "Rebuild",
+					description:
+						"DESTRUCTIVE: erases the pane's ENTIRE scrollback (including pre-session shell output) and replays the transcript, leaving exactly one current-width copy. Needs a host that honors ED3: tmux does; when nested, the innermost honoring host clears; hosts that ignore it (GNU screen) behave like Append",
+				},
+				{
+					value: "preserve",
+					label: "Preserve",
+					description: "Repaint the viewport only; history keeps its old-width wrap (zero growth)",
+				},
+			],
+		},
+	},
 
 	"display.shimmer": {
 		type: "enum",

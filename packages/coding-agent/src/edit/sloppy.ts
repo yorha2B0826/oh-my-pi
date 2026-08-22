@@ -1097,6 +1097,7 @@ function resolveBoundary(
 	tokens: PatternToken[],
 	matches: ReadonlyMap<number, Occurrence>,
 	normalized: NormalizedText,
+	lineInsertContent?: string,
 ): number {
 	const previousIndex = precedingLiteral(tokens, boundary);
 	const nextIndex = followingLiteral(tokens, boundary);
@@ -1106,7 +1107,17 @@ function resolveBoundary(
 	const immediateNext = boundary < tokens.length && tokens[boundary]?.kind === "literal";
 	if (kind === "empty") {
 		if (next) return sourceStart(normalized, next.start, normalized.text.length);
-		if (previous) return sourceEnd(normalized, previous.end, normalized.text.length);
+		if (previous) {
+			const offset = sourceEnd(normalized, previous.end, normalized.text.length);
+			// A whole-line insert anchored only on the text above lands at the
+			// end of that text — before its newline — and would splice into the
+			// anchor line. Snap forward to the start of the following line.
+			if (lineInsertContent !== undefined && offset > 0 && lineInsertContent[offset - 1] !== "\n") {
+				const newline = lineInsertContent.indexOf("\n", offset);
+				if (newline !== -1) return newline + 1;
+			}
+			return offset;
+		}
 	}
 	if (kind === "start") {
 		if (immediateNext && next) return sourceStart(normalized, next.start, normalized.text.length);
@@ -1163,6 +1174,7 @@ function collectCandidates(
 				pattern.tokens,
 				chosen,
 				normalized,
+				pattern.lineInsertion ? content : undefined,
 			);
 			const end = resolveBoundary(
 				pattern.selectionEnd,
@@ -1170,6 +1182,7 @@ function collectCandidates(
 				pattern.tokens,
 				chosen,
 				normalized,
+				pattern.lineInsertion ? content : undefined,
 			);
 			const first = chosen.get(literalIndices[0]);
 			const last = chosen.get(literalIndices.at(-1) ?? -1);
@@ -1189,9 +1202,24 @@ function collectCandidates(
 			}
 			const selectionSpans = pattern.selectionPairs.map(range => {
 				const empty = range.start === range.end;
+				const lineInsertContent = range.lineInsertion ? content : undefined;
 				return {
-					start: resolveBoundary(range.start, empty ? "empty" : "start", pattern.tokens, chosen, normalized),
-					end: resolveBoundary(range.end, empty ? "empty" : "end", pattern.tokens, chosen, normalized),
+					start: resolveBoundary(
+						range.start,
+						empty ? "empty" : "start",
+						pattern.tokens,
+						chosen,
+						normalized,
+						lineInsertContent,
+					),
+					end: resolveBoundary(
+						range.end,
+						empty ? "empty" : "end",
+						pattern.tokens,
+						chosen,
+						normalized,
+						lineInsertContent,
+					),
 				};
 			});
 			if (selectionSpans.some(span => span.start > span.end)) return;
@@ -2020,6 +2048,19 @@ function prepareCandidateEdit(
 	return { candidate, replacement, deletedText };
 }
 
+/**
+ * Frame a whole-line insert's text so it lands as its own line at `offset`:
+ * ensure a trailing newline, or open a new line when inserting at the end of
+ * a file without one.
+ */
+function frameLineInsertion(content: string, offset: number, desired: string): string {
+	if (desired === "") return desired;
+	if (offset > 0 && offset === content.length && content[offset - 1] !== "\n") {
+		return desired.startsWith("\n") ? desired : `\n${desired}`;
+	}
+	return desired.endsWith("\n") ? desired : `${desired}\n`;
+}
+
 function prepareInlineSelectionEdit(
 	content: string,
 	located: Candidate,
@@ -2046,9 +2087,7 @@ function prepareInlineSelectionEdit(
 	const replacement = renderRewrite(
 		content,
 		candidate.start,
-		selection.lineInsertion && desired !== "" && !desired.startsWith("\n") && !desired.endsWith("\n")
-			? `${desired}\n`
-			: desired,
+		selection.lineInsertion ? frameLineInsertion(content, candidate.start, desired) : desired,
 		selection.captureIndices,
 		candidate.captures,
 		operationNumber,
@@ -2665,10 +2704,9 @@ function applyOperations(content: string, input: string, context: SloppyApplyCon
 					resolvedCandidateRewrite = `${referenced.replace(/\n+$/u, "")}\n\n${anchorLine}`;
 				}
 			}
-			const rewrite =
-				pattern.lineInsertion && resolvedCandidateRewrite !== "" && !resolvedCandidateRewrite.endsWith("\n")
-					? `${resolvedCandidateRewrite}\n`
-					: resolvedCandidateRewrite;
+			const rewrite = pattern.lineInsertion
+				? frameLineInsertion(content, candidate.start, resolvedCandidateRewrite)
+				: resolvedCandidateRewrite;
 			const prepared = prepareCandidateEdit(content, candidate, pattern, operation, rewrite, operationNumber);
 			candidate = prepared.candidate;
 			const replacement = prepared.replacement;
@@ -2703,10 +2741,9 @@ function applyOperations(content: string, input: string, context: SloppyApplyCon
 			changes++;
 		}
 		if (operation.all && changes === 0) {
-			const rewrite =
-				pattern.lineInsertion && baseResolvedRewrite !== "" && !baseResolvedRewrite.endsWith("\n")
-					? `${baseResolvedRewrite}\n`
-					: baseResolvedRewrite;
+			const rewrite = pattern.lineInsertion
+				? frameLineInsertion(content, candidates[0].start, baseResolvedRewrite)
+				: baseResolvedRewrite;
 			const hint =
 				loneReference === null
 					? wouldChangeHint(content, candidates[0], pattern, operation, rewrite, operationNumber)
@@ -2719,10 +2756,13 @@ function applyOperations(content: string, input: string, context: SloppyApplyCon
 	const ordered: PlannedEdit[] = [];
 	for (const current of sorted) {
 		const previous = ordered.at(-1);
+		// A zero-width insert at another op's start boundary is disjoint —
+		// [s,s) sorts first and its text lands before the other span's
+		// rewrite. Only two competing inserts at one point stay ambiguous.
 		const overlaps =
 			previous !== undefined &&
 			(current.start < previous.end ||
-				(current.start === previous.start && (current.end === current.start || previous.end === previous.start)));
+				(current.start === previous.start && current.end === current.start && previous.end === previous.start));
 		if (!previous || !overlaps) {
 			ordered.push(current);
 			continue;

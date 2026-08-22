@@ -819,6 +819,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.ui = new TUI(new ProcessTerminal(), settings.get("showHardwareCursor"));
 		this.ui.setMaxInlineImages(settings.get("tui.maxInlineImages"));
 		this.ui.setScrollbackRebuild(settings.get("tui.scrollbackRebuild"));
+		this.ui.setResizeScrollback(settings.get("tui.resizeScrollback"));
 		// OSC 66 text-sizing is Kitty-only; resolve the setting against the terminal's
 		// capability (`TERMINAL.textSizing` defaults on for Kitty) so it stays off
 		// unless the user opts in, and never emits raw escapes on other terminals.
@@ -847,9 +848,17 @@ export class InteractiveMode implements InteractiveModeContext {
 		};
 		this.editor.setShimmerRepaintHandler(() => this.ui.requestDirectWrite(this.editor));
 		this.#syncEditorMaxHeight();
+		// Sync editor geometry only; never request a render here. This listener is
+		// registered before ProcessTerminal's own stdout "resize" listener (added in
+		// tui.start()), so it runs first on every SIGWINCH. The TUI's resize path
+		// already owns the repaint on every route (viewport fast path + settle,
+		// multiplexer debounce, alt-overlay repaint) and its settled render picks up
+		// the new editor max height. Requesting an ordinary render here additionally
+		// marked every resize as "render pending" (TUI hasPendingRender), which forced
+		// the multiplexer width epoch's conservative full-transcript replay — one
+		// duplicated transcript copy in pane history per tmux width change.
 		this.#resizeHandler = () => {
 			this.#syncEditorMaxHeight();
-			this.ui.requestRender();
 		};
 		process.stdout.on("resize", this.#resizeHandler);
 		try {

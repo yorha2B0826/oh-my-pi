@@ -1548,9 +1548,19 @@ export class Markdown
 	#activeTableRenderSpecs?: TableRenderSpec[];
 
 	#ignoreTight = false;
+	// Width-independent mutation counter for the width-epoch leading-stability
+	// checks (getNativeScrollbackWidthEpochRevision): a Markdown that precedes an
+	// epoch source (startup changelog before the transcript, a thinking block
+	// before the streaming answer) would otherwise be validated by comparing
+	// width-dependent row counts, which conflates reflow with mutation and fails
+	// resolution on every width change. Bumped by every content-shape mutation.
+	#widthEpochRevision = 0;
 
 	setIgnoreTight(ignore: boolean): this {
-		if (this.#ignoreTight !== ignore) this.#clearTableLayouts();
+		if (this.#ignoreTight !== ignore) {
+			this.#clearTableLayouts();
+			this.#widthEpochRevision++;
+		}
 		this.#ignoreTight = ignore;
 		this.invalidate();
 		return this;
@@ -1591,8 +1601,13 @@ export class Markdown
 			this.#streamPrefixLineCache = undefined;
 			this.#settledExposedText = undefined;
 		}
+		this.#widthEpochRevision++;
 		this.invalidate();
 		return true;
+	}
+
+	getNativeScrollbackWidthEpochRevision(): number {
+		return this.#widthEpochRevision;
 	}
 
 	invalidate(): void {
@@ -1608,6 +1623,7 @@ export class Markdown
 		const next = value === true;
 		if (this.#transientRenderCache === next) return;
 		this.#transientRenderCache = next;
+		this.#widthEpochRevision++;
 		this.invalidate();
 	}
 

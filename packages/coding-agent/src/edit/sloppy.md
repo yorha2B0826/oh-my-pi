@@ -4,11 +4,11 @@ Sparse edit format: name distinctive current fragments, elide the rest with `…
 Payload = `[relative/path.ts]` header, then operations; repeat headers for more files; sections apply atomically.
 
 `«` opens an operation that MUST match once; `«*` applies it to every match. One rewrite form per operation:
-- Inline: `⟪current│desired⟫` — same-line changes (renames, operator flips, argument tweaks). `⟪old│⟫` deletes; `⟪│new⟫` inserts.
+- Inline: `⟪current│desired⟫` — same-line changes (renames, operator flips, argument tweaks). `⟪old│⟫` deletes; `⟪│new⟫` inserts inline — alone on its own line, it inserts `new` as whole new line(s) there.
 - Block: MATCH lines, `»`, REWRITE lines stating the final text — multi-line restructuring (swap, move, wrap, rewrite). Empty REWRITE deletes the whole MATCH.
 
 In MATCH: `…` = gap/capture — stays on its line between fragments, spans lines at line end. No markers → REWRITE replaces the whole MATCH.
-In REWRITE or a desired side: `…` re-emits captured gaps in order; a lone `»N` line re-emits operation N's deleted text (moves never retype the block).
+In REWRITE or a desired side: `…` re-emits captured gaps in order — one MATCH gap each; a `…` with no MATCH gap left to claim is written to the file as a literal `…`; a lone `»N` line re-emits operation N's deleted text (moves never retype the block).
 </ops>
 
 <rules>
@@ -55,6 +55,14 @@ Multi-line rewrite (swap bodies) — MATCH, `»`, final text:
 } else {
   str = display;
 }
+```
+
+Insert new lines — `⟪│new⟫` alone on its own line, anchored by the line above:
+```text
+[Cargo.toml]
+«
+itertools = { workspace = true }
+⟪│jiff = { workspace = true }⟫
 ```
 
 Move a block — delete, then re-emit with `»1`:

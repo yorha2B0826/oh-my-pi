@@ -4,6 +4,9 @@ import { CustomEditor } from "@oh-my-pi/pi-coding-agent/modes/components/custom-
 import { chipLabel } from "@oh-my-pi/pi-coding-agent/modes/image-references";
 import { getEditorTheme, initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { ImageBudget } from "@oh-my-pi/pi-tui";
+import { setKittyGraphics } from "@oh-my-pi/pi-tui/kitty-graphics";
+import { getCellDimensions, ImageProtocol, setCellDimensions, TERMINAL } from "@oh-my-pi/pi-tui/terminal-capabilities";
+import { visibleWidth } from "@oh-my-pi/pi-tui/utils";
 
 // 2x2 red PNG — real header so the band's dimension probe decodes 2x2.
 const TINY_PNG =
@@ -72,5 +75,42 @@ describe("AttachmentChipsBand", () => {
 		const rows = band.render(20).map(Bun.stripANSI);
 		expect(rows[0]).toContain(chipLabel("paste", 1));
 		expect(rows[0]).not.toContain(chipLabel("paste", 2));
+	});
+});
+
+describe("AttachmentChipsBand — Kitty placeholder thumbnails", () => {
+	it("keeps every card row exactly card-width so the borders align", () => {
+		const mutable = TERMINAL as unknown as { imageProtocol: ImageProtocol | null };
+		const originalProtocol = TERMINAL.imageProtocol;
+		const originalCellDims = { ...getCellDimensions() };
+		mutable.imageProtocol = ImageProtocol.Kitty;
+		setKittyGraphics({ unicodePlaceholders: true });
+		setCellDimensions({ widthPx: 10, heightPx: 21 });
+		try {
+			// Real PNG header for 560x502 so the probe yields a >1-column grid.
+			const header = Buffer.alloc(33);
+			header.write("\x89PNG\r\n\x1a\n", 0, "binary");
+			header.writeUInt32BE(13, 8);
+			header.write("IHDR", 12);
+			header.writeUInt32BE(560, 16);
+			header.writeUInt32BE(502, 20);
+			const { editor, band } = makeBand();
+			editor.pendingImages.push({ type: "image", data: header.toString("base64"), mimeType: "image/png" });
+			editor.insertAtom(chipLabel("image", 1), "[Image #1, 560x502]");
+			const rows = band.render(80);
+			expect(rows).toHaveLength(6);
+			// Thumbnail path actually engaged: the placement APC rides row 1.
+			expect(rows[1]).toContain("\x1b_Ga=p,U=1");
+			// Regression: the placement APC was counted as visible width, which
+			// dropped row 1's centering pad and painted its right border 3 cells
+			// inside the card. Every row must measure exactly the card width.
+			for (const row of rows) {
+				expect(visibleWidth(row)).toBe(14);
+			}
+		} finally {
+			mutable.imageProtocol = originalProtocol;
+			setKittyGraphics({ unicodePlaceholders: false });
+			setCellDimensions(originalCellDims);
+		}
 	});
 });

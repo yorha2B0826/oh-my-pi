@@ -47,6 +47,35 @@ describe("sloppy v8", () => {
 		);
 	});
 
+	test("lands a trailing insert-only selection line on its own line", () => {
+		// Regression: `⟪│new⟫` alone after the last anchor glued into it
+		// (`itertools = { workspace = true }jiff = { workspace = true }`).
+		const content = "im = { workspace = true }\nitertools = { workspace = true }\nnext = { workspace = true }\n";
+		const input = inlineOperation("itertools = { workspace = true }\n⟪│jiff = { workspace = true }⟫");
+
+		expect(variant.apply(content, input, context)).toBe(
+			"im = { workspace = true }\nitertools = { workspace = true }\njiff = { workspace = true }\nnext = { workspace = true }\n",
+		);
+	});
+
+	test("lands a multi-line insert selection before a blank line on its own line", () => {
+		// Regression: a selection whose desired text carried its own newline
+		// glued into the anchor and doubled the following blank line.
+		const content = "Copyright (c) 2025 First Author\nCopyright (c) 2026 Second Author\n\nPermission is granted\n";
+		const input = inlineOperation("Copyright (c) 2026 Second Author\n⟪│Copyright (c) 2026 Third Author\n⟫");
+
+		expect(variant.apply(content, input, context)).toBe(
+			"Copyright (c) 2025 First Author\nCopyright (c) 2026 Second Author\nCopyright (c) 2026 Third Author\n\nPermission is granted\n",
+		);
+	});
+
+	test("opens a new line for an insert after the last line of a file without a trailing newline", () => {
+		const content = "alpha = 1\nomega = 2";
+		const input = inlineOperation("omega = 2\n⟪│zeta = 3⟫");
+
+		expect(variant.apply(content, input, context)).toBe("alpha = 1\nomega = 2\nzeta = 3");
+	});
+
 	test("applies inline insertion and deletion as independent operations", () => {
 		const content = "const timeout = 5000;\nconst debug = true;\nrun();\n";
 		const input = [
