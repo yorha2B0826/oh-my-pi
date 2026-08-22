@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [18.0.0] - 2026-08-22
+
+### Added
+
+- Added reversible private-use glyph tokenization for Claude-compatible provider requests, including prompt notices, streamed response decoding, and safe handling of unresolved model-authored glyph tokens.
+
 ## [17.4.3] - 2026-08-21
 
 ### Fixed

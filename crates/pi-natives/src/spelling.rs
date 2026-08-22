@@ -163,6 +163,10 @@ pub fn macos_spell_checker_available() -> bool {
 /// Returns an empty list when Apple's spelling service is unavailable.
 /// On macOS, the check runs on the dedicated spelling thread.
 #[napi(js_name = "macOSCheckSpelling")]
+#[cfg_attr(
+	not(target_os = "macos"),
+	allow(clippy::unused_async, reason = "napi contract returns a Promise on every platform")
+)]
 pub async fn macos_check_spelling(text: String) -> napi::Result<Vec<SpellingRange>> {
 	#[cfg(target_os = "macos")]
 	{
@@ -180,6 +184,10 @@ pub async fn macos_check_spelling(text: String) -> napi::Result<Vec<SpellingRang
 /// Returns an empty list when Apple's spelling service is unavailable.
 /// On macOS, the lookup runs on the dedicated spelling thread.
 #[napi(js_name = "macOSCompleteWord")]
+#[cfg_attr(
+	not(target_os = "macos"),
+	allow(clippy::unused_async, reason = "napi contract returns a Promise on every platform")
+)]
 pub async fn macos_complete_word(
 	text: String,
 	start: u32,
@@ -202,6 +210,10 @@ pub async fn macos_complete_word(
 /// unavailable.
 /// On macOS, the lookup runs on the dedicated spelling thread.
 #[napi(js_name = "macOSAutocorrectWord")]
+#[cfg_attr(
+	not(target_os = "macos"),
+	allow(clippy::unused_async, reason = "napi contract returns a Promise on every platform")
+)]
 pub async fn macos_autocorrect_word(
 	text: String,
 	start: u32,
@@ -222,6 +234,10 @@ pub async fn macos_autocorrect_word(
 /// Returns an empty list when Apple's spelling service is unavailable.
 /// On macOS, the lookup runs on the dedicated spelling thread.
 #[napi(js_name = "macOSSpellingGuesses")]
+#[cfg_attr(
+	not(target_os = "macos"),
+	allow(clippy::unused_async, reason = "napi contract returns a Promise on every platform")
+)]
 pub async fn macos_spelling_guesses(
 	text: String,
 	start: u32,
