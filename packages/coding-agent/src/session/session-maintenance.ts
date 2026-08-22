@@ -26,6 +26,7 @@ import {
 	DEFAULT_SHAKE_CONFIG,
 	type CompactionSettings as EngineCompactionSettings,
 	effectiveReserveTokens,
+	invalidateMessageCache,
 	isTranscriptUsageAnchor,
 	NativeCompactionError,
 	prepareCompaction,
@@ -531,6 +532,7 @@ export class SessionMaintenance {
 	 * Surgically reduce context by dropping heavy content ("shake").
 	 *
 	 * - `images` delegates to {@link dropImages}.
+	 * - `thinking` removes assistant reasoning blocks without replacement text.
 	 * - `elide` replaces whole tool-call results and large fenced/XML blocks
 	 *   with short placeholders that embed an `artifact://` recovery link.
 	 *
@@ -544,6 +546,33 @@ export class SessionMaintenance {
 		if (mode === "images") {
 			const { removed } = await this.#host.dropImages();
 			return { mode, toolResultsDropped: 0, blocksDropped: 0, imagesDropped: removed, tokensFreed: 0 };
+		}
+
+		if (mode === "thinking") {
+			const branchEntries = this.#host.sessionManager.getBranch();
+			let removed = 0;
+			for (const entry of branchEntries) {
+				if (entry.type !== "message" || entry.message.role !== "assistant") continue;
+				const message = entry.message;
+				const kept = message.content.filter(
+					block => block.type !== "thinking" && block.type !== "redactedThinking",
+				);
+				const dropped = message.content.length - kept.length;
+				if (dropped === 0) continue;
+				// Provider serializers omit empty assistant turns, so don't invent model-authored text.
+				message.content = kept;
+				invalidateMessageCache(message);
+				removed += dropped;
+			}
+			if (removed === 0) {
+				return { mode, toolResultsDropped: 0, blocksDropped: 0, thinkingBlocksDropped: 0, tokensFreed: 0 };
+			}
+			await this.#host.sessionManager.rewriteEntries();
+			const sessionContext = this.#host.buildDisplaySessionContext();
+			this.#host.agent.replaceMessages(sessionContext.messages);
+			this.#host.resetAdvisorRuntimes("shake");
+			this.#host.closeCodexProviderSessionsForHistoryRewrite();
+			return { mode, toolResultsDropped: 0, blocksDropped: 0, thinkingBlocksDropped: removed, tokensFreed: 0 };
 		}
 
 		const branchEntries = this.#host.sessionManager.getBranch();

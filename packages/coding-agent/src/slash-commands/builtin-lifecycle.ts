@@ -40,7 +40,8 @@ function parseShakeMode(args: string): ShakeMode | { error: string } {
 	const verb = args.trim().toLowerCase();
 	if (verb === "" || verb === "elide") return "elide";
 	if (verb === "images") return "images";
-	return { error: `Unknown /shake mode "${verb}". Use elide or images.` };
+	if (verb === "thinking") return "thinking";
+	return { error: `Unknown /shake mode "${verb}". Use elide, images, or thinking.` };
 }
 
 /** Format the session's workspace directories (cwd + additional) for display. */
@@ -54,6 +55,7 @@ function formatWorkspaceDirectories(runtime: SlashCommandRuntime, note?: string)
 export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 	{
 		name: "ssh",
+		icon: "host",
 		description: "Manage SSH hosts (add, list, remove)",
 		acpDescription: "Manage SSH connections",
 		inlineHint: "<subcommand>",
@@ -100,7 +102,17 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 		handleTui: handleIwanTui,
 	},
 	{
+		name: "new",
+		icon: "plus",
+		description: "Start a new session",
+		handleTui: async (_command, runtime) => {
+			runtime.ctx.editor.setText("");
+			await runtime.ctx.handleClearCommand();
+		},
+	},
+	{
 		name: "fresh",
+		icon: "restart",
 		description: "Reset provider stream state without changing the local transcript",
 		getTuiAutocompleteDescription: runtime =>
 			runtime.ctx.session.isStreaming ? "Fresh: unavailable while streaming" : "Fresh: ready",
@@ -122,6 +134,7 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 	},
 	{
 		name: "clear",
+		icon: "eraser",
 		description: "Clear the conversation context in place, keeping the session",
 		getTuiAutocompleteDescription: runtime =>
 			runtime.ctx.session.isStreaming ? "Clear: unavailable while streaming" : "Clear: drop context, keep session",
@@ -132,6 +145,7 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 	},
 	{
 		name: "drop",
+		icon: "trash",
 		description: "Delete the current session and start a new one",
 		handleTui: async (_command, runtime) => {
 			runtime.ctx.editor.setText("");
@@ -140,6 +154,7 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 	},
 	{
 		name: "compact",
+		icon: "compress",
 		description: "Manually compact the session context",
 		acpDescription: "Compact the conversation",
 		subcommands: COMPACT_MODES.map(mode => ({
@@ -205,13 +220,15 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 	},
 	{
 		name: "shake",
+		icon: "vibrate",
 		description: "Drop heavy content from context (tool results, large blocks)",
 		acpDescription: "Shake heavy content out of the conversation context",
 		subcommands: [
 			{ name: "elide", description: "Strip tool results + large blocks (default)" },
 			{ name: "images", description: "Strip image blocks" },
+			{ name: "thinking", description: "Drop all thinking blocks" },
 		],
-		acpInputHint: "[elide|images]",
+		acpInputHint: "[elide|images|thinking]",
 		allowArgs: true,
 		handle: async (command, runtime) => {
 			const mode = parseShakeMode(command.args);
@@ -232,6 +249,7 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 	},
 	{
 		name: "handoff",
+		icon: "handoff",
 		description: "Hand off session context to a new session",
 		acpDescription: "Summarize the session into a handoff document and compact in place",
 		inlineHint: "[focus instructions]",
@@ -298,6 +316,7 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 	},
 	{
 		name: "resume",
+		icon: "history",
 		description: "Resume a different session",
 		inlineHint: "[session id|@claude|@codex]",
 		allowArgs: true,
@@ -328,6 +347,7 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 	},
 	{
 		name: "btw",
+		icon: "question",
 		description: "Ask an ephemeral side question using the current session context",
 		inlineHint: "<question>",
 		allowArgs: true,
@@ -339,6 +359,7 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 	},
 	{
 		name: "tan",
+		icon: "rocket",
 		description: "Run a full background agent on tangential work",
 		inlineHint: "<work>",
 		allowArgs: true,
@@ -350,6 +371,7 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 	},
 	{
 		name: "omfg",
+		icon: "rule",
 		description: "Forge a TTSR rule from a complaint to stop a recurring behavior",
 		inlineHint: "<complaint>",
 		allowArgs: true,
@@ -361,6 +383,7 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 	},
 	{
 		name: "cleanse",
+		icon: "stethoscope",
 		description: "Detect and fix project diagnostics with weighted parallel subagents",
 		inlineHint: "[request] [--all]",
 		allowArgs: true,
@@ -372,6 +395,7 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 	},
 	{
 		name: "retry",
+		icon: "redo",
 		description: "Retry the last failed agent turn",
 		handle: async (_command, runtime) => {
 			if (runtime.session.isStreaming) {
@@ -406,6 +430,7 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 	},
 	{
 		name: "debug",
+		icon: "bug",
 		description: "Open debug tools selector",
 		handleTui: async (_command, runtime) => {
 			await runtime.ctx.showDebugSelector();
@@ -414,6 +439,7 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 	},
 	{
 		name: "memory",
+		icon: "memory",
 		description: "Inspect and operate memory maintenance",
 		acpDescription: "Manage memory",
 		acpInputHint: "<subcommand>",
@@ -486,6 +512,7 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 	},
 	{
 		name: "rename",
+		icon: "pencil",
 		description: "Rename the current session",
 		inlineHint: "<title>",
 		allowArgs: true,
@@ -513,6 +540,7 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 	},
 	{
 		name: "move",
+		icon: "folderMove",
 		description: "Move the current session to a different directory",
 		acpDescription: "Move the current session to a different directory",
 		inlineHint: "[<path>]",
@@ -558,6 +586,7 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 	},
 	{
 		name: "add-dir",
+		icon: "folderPlus",
 		description: "Add a workspace directory to this session (multi-root)",
 		acpDescription: "Add a workspace directory to this session",
 		inlineHint: "<path>",
@@ -589,6 +618,7 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 	},
 	{
 		name: "remove-dir",
+		icon: "folderMinus",
 		description: "Remove a workspace directory from this session",
 		acpDescription: "Remove a workspace directory from this session",
 		inlineHint: "<path>",

@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "bun:test";
 import { AttachmentChipsBand } from "@oh-my-pi/pi-coding-agent/modes/components/attachment-chips";
 import { CustomEditor } from "@oh-my-pi/pi-coding-agent/modes/components/custom-editor";
-import { chipLabel } from "@oh-my-pi/pi-coding-agent/modes/image-references";
+import { chipLabel } from "@oh-my-pi/pi-coding-agent/modes/composer-attachments";
 import { getEditorTheme, initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { ImageBudget } from "@oh-my-pi/pi-tui";
 import { setKittyGraphics } from "@oh-my-pi/pi-tui/kitty-graphics";

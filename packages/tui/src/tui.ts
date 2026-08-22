@@ -117,6 +117,12 @@ export interface TUIOptions {
 export interface TUIStartOptions {
 	/** Clear saved native scrollback before the first paint. */
 	clearScrollback?: boolean;
+	/**
+	 * Paint without owning stdin: the terminal stays in cooked mode (kernel
+	 * echo + line editing at the hardware cursor) until {@link TUI.enableInput}
+	 * switches to raw input and replays the kernel-buffered keystrokes.
+	 */
+	deferInput?: boolean;
 }
 
 const DEFAULT_RENDER_SCHEDULER: RenderScheduler = {
@@ -1234,6 +1240,18 @@ export class TUI extends Container {
 	 * feels dead to the user and no longer justifies further CPU savings.
 	 */
 	static readonly #MAX_ADAPTIVE_RENDER_MS = 200;
+	/**
+	 * Output backpressure gate. While the terminal still owes more than this
+	 * many bytes, composing another frame would only queue a stale paint
+	 * behind the backlog — and once the kernel PTY buffer is full, handing the
+	 * runtime more bytes degrades into thread-blocking writes. Defer the
+	 * render (keeping its forced/clear-scrollback intent) and retry shortly;
+	 * the eventual frame composes the latest component state, so a slow
+	 * terminal receives only fresh frames instead of every intermediate one.
+	 */
+	static readonly #MAX_PENDING_OUTPUT_BYTES = 256 * 1024;
+	/** Retry cadence while the output backlog gate is holding renders back. */
+	static readonly #OUTPUT_BACKLOG_RETRY_MS = 10;
 	#inputRenderGraceUntilMs = 0;
 	// Pane-reflow settle window for tmux/screen/zellij. The host process gets
 	// SIGWINCH (and `process.stdout` already reports the new geometry) before
@@ -1462,6 +1480,8 @@ export class TUI extends Container {
 	// {@link #resizeRepaintsInPlace} routes resizes through the in-place path.
 	#altToggleResizesInPlace = false;
 	#stopped = false;
+	/** True between a `deferInput` start() and enableInput(). */
+	#inputDeferred = false;
 	// Always-on event-loop lag probe. The high default threshold keeps it quiet;
 	// it only logs `ui.loop-blocked` (with the current loop phase) when a frame
 	// budget is genuinely starved. Armed in start(), disarmed in stop().
@@ -2197,6 +2217,7 @@ export class TUI extends Container {
 
 	start(options?: TUIStartOptions): void {
 		this.#stopped = false;
+		this.#inputDeferred = options?.deferInput === true;
 		this.#watchdog.start();
 		this.#ghosttyInitialImageDelayDone = false;
 		this.#ghosttyImageReadyAtMs = this.#renderScheduler.now() + TUI.#GHOSTTY_INITIAL_IMAGE_DELAY_MS;
@@ -2279,6 +2300,7 @@ export class TUI extends Container {
 				});
 			},
 			() => this.stop(),
+			{ deferInput: this.#inputDeferred },
 		);
 		if (this.#stopped) return;
 		for (const listener of this.#startListeners) {
@@ -2290,9 +2312,24 @@ export class TUI extends Container {
 		}
 		this.terminal.hideCursor();
 		this.#recordHardwareCursorHidden();
+		if (!this.#inputDeferred) {
+			this.#querySixelSupport();
+			this.#queryCellSize();
+		}
+		this.requestRender(true, { clearScrollback: options?.clearScrollback === true });
+	}
+	/**
+	 * Take ownership of stdin after a `deferInput` start: raw mode, input
+	 * handlers, and the response-eliciting capability probes start() skipped.
+	 * Keystrokes typed in cooked mode meanwhile arrive through the normal input
+	 * path. Idempotent; no-op when input was never deferred.
+	 */
+	enableInput(): void {
+		if (!this.#inputDeferred || this.#stopped) return;
+		this.#inputDeferred = false;
+		this.terminal.enableInput?.();
 		this.#querySixelSupport();
 		this.#queryCellSize();
-		this.requestRender(true, { clearScrollback: options?.clearScrollback === true });
 	}
 
 	addStartListener(listener: StartListener): () => void {
@@ -2988,6 +3025,18 @@ export class TUI extends Container {
 		}
 	}
 
+	#runScheduledRender = (): void => {
+		this.#renderTimer = undefined;
+		if (this.#stopped || !this.#renderRequested) {
+			return;
+		}
+		this.#renderRequested = false;
+		this.#executeRender();
+		if (this.#renderRequested) {
+			this.#scheduleRender();
+		}
+	};
+
 	#scheduleRender(): void {
 		if (this.#stopped || this.#renderTimer || !this.#renderRequested) {
 			return;
@@ -3012,17 +3061,7 @@ export class TUI extends Container {
 		const adaptiveDelay = Math.max(0, adaptiveFloor - elapsed);
 		const inputGraceDelay = Math.max(0, this.#inputRenderGraceUntilMs - now);
 		const delay = Math.max(cadenceDelay, adaptiveDelay, inputGraceDelay);
-		this.#renderTimer = this.#renderScheduler.scheduleRender(() => {
-			this.#renderTimer = undefined;
-			if (this.#stopped || !this.#renderRequested) {
-				return;
-			}
-			this.#renderRequested = false;
-			this.#executeRender();
-			if (this.#renderRequested) {
-				this.#scheduleRender();
-			}
-		}, delay);
+		this.#renderTimer = this.#renderScheduler.scheduleRender(this.#runScheduledRender, delay);
 	}
 
 	/**
@@ -3031,10 +3070,27 @@ export class TUI extends Container {
 	 * reads it re-entrantly) and compute the cost once the paint returns.
 	 */
 	#executeRender(): void {
+		if (this.#deferRenderForOutputBacklog()) return;
 		const start = this.#renderScheduler.now();
 		this.#lastRenderAt = start;
 		this.#doRender();
 		this.#lastFrameCostMs = this.#renderScheduler.now() - start;
+	}
+	/**
+	 * True when the frame was deferred because the terminal's output backlog
+	 * exceeds {@link TUI.#MAX_PENDING_OUTPUT_BYTES}. Re-arms a retry render;
+	 * one-shot paint intents (`#clearScrollbackOnNextRender`,
+	 * `#forceViewportRepaintOnNextRender`) survive untouched for it.
+	 */
+	#deferRenderForOutputBacklog(): boolean {
+		const pending = this.terminal.pendingOutputBytes;
+		if (pending === undefined || pending <= TUI.#MAX_PENDING_OUTPUT_BYTES) return false;
+		this.#renderRequested = true;
+		this.#renderTimer ??= this.#renderScheduler.scheduleRender(
+			this.#runScheduledRender,
+			TUI.#OUTPUT_BACKLOG_RETRY_MS,
+		);
+		return true;
 	}
 
 	#handleInput(data: string): void {

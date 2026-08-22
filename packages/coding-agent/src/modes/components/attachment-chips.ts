@@ -12,7 +12,8 @@ import {
 	visibleWidth,
 } from "@oh-my-pi/pi-tui";
 import { convertImageToPng } from "../../utils/image-loading";
-import { attachmentSgr, cachedImageDimensions, setCachedImageDimensions } from "../image-references";
+import { attachmentSgr } from "../composer-attachments";
+import { cachedImageDimensions, setCachedImageDimensions } from "../image-references";
 import { theme } from "../theme/theme";
 import type { ComposerChipDescriptor, CustomEditor, TextAttachment } from "./custom-editor";
 
