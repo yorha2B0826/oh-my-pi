@@ -324,7 +324,7 @@ function buildSlashCommandCompletions(
 				};
 				let best: (AutocompleteItem & { score: number; usage: number }) | undefined;
 
-				const isSkillCommand = name.startsWith("skill:");
+				const isSkillCommand = name.startsWith(SKILL_NAMESPACE);
 				const nameScore =
 					lowerPrefix.length === 0 && isSkillCommand
 						? 950
@@ -383,7 +383,35 @@ function hasPromptTextBeforeSlash(
 	return textBeforeCursor.slice(0, slashStart).trim() !== "";
 }
 
-const SKILL_NAMESPACE = "skill:";
+export const SKILL_NAMESPACE = "skill:";
+
+/**
+ * Collapse `skill:*` commands into a single `/skill:` namespace row while the
+ * typed prefix has not committed to the namespace. Until the prefix starts
+ * with `skill:`, individual skills never list — a lone group entry (shown only
+ * while the prefix is still a prefix of `skill:`) keeps the `/` popup
+ * readable. Accepting the group inserts `/skill:` without a trailing space so
+ * the reopened popup expands to the individual skills.
+ */
+function collapseSkillNamespace(commands: CommandEntry[], lowerPrefix: string): CommandEntry[] {
+	if (lowerPrefix.startsWith(SKILL_NAMESPACE)) return commands;
+	let skillCount = 0;
+	let skillIcon: string | undefined;
+	const rest = commands.filter(cmd => {
+		if (!getCommandName(cmd)?.startsWith(SKILL_NAMESPACE)) return true;
+		skillCount += 1;
+		skillIcon ??= cmd.icon;
+		return false;
+	});
+	if (skillCount === 0) return commands;
+	if (!SKILL_NAMESPACE.startsWith(lowerPrefix)) return rest;
+	rest.push({
+		name: SKILL_NAMESPACE,
+		description: `${skillCount} skill${skillCount === 1 ? "" : "s"}`,
+		...(skillIcon && { icon: skillIcon }),
+	});
+	return rest;
+}
 
 /**
  * Whether a mid-prompt slash token (`prose … /tok`) is skill-shaped enough to
@@ -474,7 +502,11 @@ export class CombinedAutocompleteProvider implements AutocompleteProvider {
 
 				const matches = isMidPromptSkillLookup
 					? buildMidPromptSkillCompletions(this.#commands, lowerPrefix)
-					: buildSlashCommandCompletions(this.#commands, lowerPrefix, this.#commandUsage);
+					: buildSlashCommandCompletions(
+							collapseSkillNamespace(this.#commands, lowerPrefix),
+							lowerPrefix,
+							this.#commandUsage,
+						);
 
 				if (matches.length > 0) {
 					return {
@@ -631,14 +663,18 @@ export class CombinedAutocompleteProvider implements AutocompleteProvider {
 			const slashPrefix = textBeforeCursor.slice(leadingSlashStart);
 			if (!slashPrefix.includes(" ") && !slashPrefix.slice(1).includes("/")) {
 				const beforeSlash = currentLine.slice(0, leadingSlashStart);
-				const newLine = `${beforeSlash}/${item.value} ${afterCursor}`;
+				// The collapsed `/skill:` namespace row completes to the namespace
+				// itself: no trailing space, so completion continues with the
+				// individual skills instead of finishing a command token.
+				const insert = item.value === SKILL_NAMESPACE ? `/${item.value}` : `/${item.value} `;
+				const newLine = `${beforeSlash}${insert}${afterCursor}`;
 				const newLines = [...lines];
 				newLines[cursorLine] = newLine;
 
 				return {
 					lines: newLines,
 					cursorLine,
-					cursorCol: beforeSlash.length + item.value.length + 2, // +2 for "/" and space
+					cursorCol: beforeSlash.length + insert.length,
 				};
 			}
 		}
@@ -1099,7 +1135,13 @@ export class CombinedAutocompleteProvider implements AutocompleteProvider {
 		const prefix = commandText.slice(1);
 		const lowerPrefix = prefix.toLowerCase();
 
-		const matches = buildSlashCommandCompletions(this.#commands, lowerPrefix, this.#commandUsage);
+		// The `/skill:` namespace row is excluded here: the sync path submits
+		// immediately after applying, and the bare namespace is not a command.
+		const matches = buildSlashCommandCompletions(
+			collapseSkillNamespace(this.#commands, lowerPrefix),
+			lowerPrefix,
+			this.#commandUsage,
+		).filter(item => item.value !== SKILL_NAMESPACE);
 
 		if (matches.length === 0) return null;
 		// Mirror `getSuggestions`: preserve leading whitespace so the editor's

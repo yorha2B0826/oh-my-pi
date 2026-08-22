@@ -54,6 +54,7 @@ import type { ForeignSessionInfo, ForeignSessionSource } from "../../session/for
 import type { SessionEntry } from "../../session/session-entries";
 import type { SessionInfo } from "../../session/session-listing";
 import { SessionManager } from "../../session/session-manager";
+import { loadPinnedSessionIds } from "../../session/session-pins";
 import { FileSessionStorage } from "../../session/session-storage";
 import { type LogoutAccount, toLogoutAccounts } from "../../slash-commands/helpers/logout";
 import {
@@ -1561,10 +1562,11 @@ export class SelectorController {
 				showCwd: true,
 			};
 		} else {
-			sessions = await SessionManager.list(
-				this.ctx.sessionManager.getCwd(),
-				this.ctx.sessionManager.getSessionDir(),
-			);
+			const [loadedSessions, pinnedIds] = await Promise.all([
+				SessionManager.list(this.ctx.sessionManager.getCwd(), this.ctx.sessionManager.getSessionDir()),
+				loadPinnedSessionIds(),
+			]);
+			sessions = loadedSessions;
 			const historyStorage = this.ctx.historyStorage;
 			const historyMatcher = historyStorage
 				? (query: string) => historyStorage.matchingSessionIds(query)
@@ -1588,6 +1590,7 @@ export class SelectorController {
 				},
 				historyMatcher,
 				loadAllSessions: () => SessionManager.listAll(),
+				pinnedIds,
 			};
 		}
 

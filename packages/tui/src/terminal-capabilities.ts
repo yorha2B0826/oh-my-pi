@@ -105,7 +105,7 @@ export class TerminalInfo {
 		public readonly deccara: boolean = false,
 		readonly supportsScreenToScrollback: boolean = false,
 		/** Renders the Kitty OSC 66 text-sizing protocol (scaled spans). Kitty only. */
-		public readonly textSizing: boolean = false,
+		public readonly supportsTextSizing: boolean = false,
 		/**
 		 * Hangul Compatibility Jamo (U+3131..=U+318E) cell width. Ghostty follows
 		 * UAX#11 (2 cells); Warp paints 1; "platform" keeps the OS default
@@ -557,11 +557,14 @@ export interface RuntimeTerminal extends TerminalInfo {
 	hyperlinks: boolean;
 	deccara: boolean;
 	supportsScreenToScrollback: boolean;
+	/** Whether OSC 66 text sizing is currently enabled. */
 	textSizing: boolean;
 }
 
 export const TERMINAL: RuntimeTerminal = (() => {
 	const resolved = getTerminalInfo(TERMINAL_ID).clone();
+	// Detection records support; hosts opt into OSC 66 separately.
+	resolved.textSizing = false;
 
 	const forcedImageProtocol = getForcedImageProtocol();
 	if (forcedImageProtocol !== undefined) {
@@ -618,7 +621,7 @@ export function setTerminalScreenToScrollback(enabled: boolean): void {
 
 /**
  * Enable/disable OSC 66 text-sizing at runtime. The coding-agent calls this from
- * the `tui.textSizing` setting (gated on the terminal's static `textSizing`
+ * the `tui.textSizing` setting (gated on the terminal's static `supportsTextSizing`
  * capability); tests flip it directly to exercise the scaled-heading path.
  */
 export function setTerminalTextSizing(enabled: boolean): void {

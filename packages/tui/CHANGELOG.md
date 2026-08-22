@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Added
+
+- Collapsed individual skill commands into a `/skill:` namespace entry to declutter suggestions
+
+### Changed
+
+- Improved slash command autocompletion to chain suggestions after selecting a namespace
+
+### Fixed
+
+- Fixed pasting an image in kitty occasionally spraying base64 text into the composer alongside the image attachment: a kitty OSC 5522 clipboard packet torn by the incomplete-escape flush is now discarded up to its terminator instead of being replayed as keystrokes.
+- Fixed Kitty OSC 66 headings activating before the host explicitly enables text sizing.
+
 ## [18.0.0] - 2026-08-22
 
 ### Breaking Changes

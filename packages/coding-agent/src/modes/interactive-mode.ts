@@ -865,9 +865,9 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.ui.setResizeScrollback(settings.get("tui.resizeScrollback"));
 		this.ui.setShowHardwareCursor(settings.get("showHardwareCursor"));
 		// OSC 66 text-sizing is Kitty-only; resolve the setting against the terminal's
-		// capability (`TERMINAL.textSizing` defaults on for Kitty) so it stays off
+		// capability (`TERMINAL.supportsTextSizing` defaults on for Kitty) so it stays off
 		// unless the user opts in, and never emits raw escapes on other terminals.
-		setTerminalTextSizing(settings.get("tui.textSizing") && TERMINAL.textSizing);
+		setTerminalTextSizing(settings.get("tui.textSizing") && TERMINAL.supportsTextSizing);
 		this.chatContainer = new TranscriptContainer();
 		this.pendingMessagesContainer = new AnchoredLiveContainer();
 		this.statusContainer = new AnchoredLiveContainer();

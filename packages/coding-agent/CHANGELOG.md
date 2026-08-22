@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added the `/pin` slash command to pin and unpin sessions so they stay at the top of the `--resume` picker UI.
+### Changed
+
+- Slash-command autocomplete now collapses skills into a single `/skill:` row; the individual skills list once the prefix reaches `/skill:` (accepting the row with Tab/Enter expands it in place).
+- Subagents in a shared working tree no longer run formatters, linters, or project-wide builds/test suites unless their assignment asks for it; validation runs once by the main agent.
+### Fixed
+
+- Fixed Kitty text-sized Markdown headings activating before `tui.textSizing` is enabled.
+- Fixed status text retaining hidden DCS, PM, and APC payloads after escape-sequence sanitization.
+- Fixed extension load errors truncating explicitly excluded package import specifiers.
+- Fixed subagents crashing before their first turn when an extension contributed a tool or skill without a `description`; the context-breakdown token estimate now coalesces missing descriptions and system-prompt sections instead of passing `undefined` to the tokenizer ([#9331](https://github.com/can1357/oh-my-pi/issues/9331)).
+
 ## [18.0.0] - 2026-08-22
 
 ### Added

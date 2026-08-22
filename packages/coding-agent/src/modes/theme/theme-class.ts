@@ -513,6 +513,7 @@ export class Theme {
 			git: this.#symbols["icon.git"],
 			branch: this.#symbols["icon.branch"],
 			pr: this.#symbols["icon.pr"],
+			pin: this.#symbols["icon.pin"],
 			tokens: this.#symbols["icon.tokens"],
 			context: this.#symbols["icon.context"],
 			cost: this.#symbols["icon.cost"],
@@ -620,6 +621,7 @@ export class Theme {
 			rule: this.#symbols["icon.extensionRule"],
 			skill: this.#symbols["icon.extensionSkill"],
 			mcp: this.#symbols["icon.extensionMcp"],
+			pin: this.#symbols["icon.pin"],
 		};
 	}
 

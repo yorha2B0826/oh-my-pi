@@ -4,6 +4,7 @@ import {
 	findLeadingSlashCommandStart,
 	findTrailingSlashCommandStart,
 	midPromptSkillTokenMatches,
+	SKILL_NAMESPACE,
 } from "../autocomplete";
 import { BracketedPasteHandler, decodeReencodedPasteControls } from "../bracketed-paste";
 import { canonicalKeyId, getKeybindings, type KeybindingsManager } from "../keybindings";
@@ -1476,7 +1477,8 @@ export class Editor implements Component, Focusable {
 					(kb.matchesCanonical(canonical, "tui.input.submit") || data === "\n") &&
 					findLeadingSlashCommandStart(this.#autocompletePrefix) !== null &&
 					this.#isInSubmittedSlashCommandContext() &&
-					!this.#selectedCompletionIsPath()
+					!this.#selectedCompletionIsPath() &&
+					!this.#selectedCompletionIsSkillNamespace()
 				) {
 					const selected = this.#autocompleteList.getSelectedItem();
 					// Check for stale autocomplete state due to debounce
@@ -1515,6 +1517,7 @@ export class Editor implements Component, Focusable {
 						this.#cancelAutocomplete();
 					} else {
 						if (selected && this.#autocompleteProvider) {
+							const shouldChainSlashCommandAutocomplete = this.#isSlashCommandNameAutocompleteSelection();
 							const result = this.#autocompleteProvider.applyCompletion(
 								this.#state.lines,
 								this.#state.cursorLine,
@@ -1535,6 +1538,9 @@ export class Editor implements Component, Focusable {
 							}
 
 							result.onApplied?.();
+							if (shouldChainSlashCommandAutocomplete && this.#isCompletedSlashCommandAtCursor()) {
+								void this.#tryTriggerAutocomplete();
+							}
 						}
 						return;
 					}
@@ -3363,6 +3369,14 @@ export class Editor implements Component, Focusable {
 		if (!selected) return false;
 		return selected.value.startsWith("/") || selected.value.startsWith('"');
 	}
+	/**
+	 * Whether the current popup selection is the collapsed `/skill:` namespace
+	 * row. Accepting it expands the namespace (insert `/skill:`, reopen the
+	 * popup) instead of submitting, since the bare namespace is not a command.
+	 */
+	#selectedCompletionIsSkillNamespace(): boolean {
+		return this.#autocompleteList?.getSelectedItem()?.value === SKILL_NAMESPACE;
+	}
 
 	#isSlashCommandNameAutocompleteSelection(): boolean {
 		if (this.#autocompleteState !== "regular") {
@@ -3383,7 +3397,10 @@ export class Editor implements Component, Focusable {
 		}
 
 		const textBeforeCursor = currentLine.slice(0, this.#state.cursorCol).trimStart();
-		return this.#isInSubmittedSlashCommandContext() && /^\/\S+ $/.test(textBeforeCursor);
+		return (
+			this.#isInSubmittedSlashCommandContext() &&
+			(/^\/\S+ $/.test(textBeforeCursor) || textBeforeCursor === `/${SKILL_NAMESPACE}`)
+		);
 	}
 
 	// Autocomplete methods

@@ -79,11 +79,10 @@ export class VirtualTerminal implements Terminal {
 	#inputHandler?: (data: string) => void;
 	#resizeHandler?: () => void;
 	#pendingEngineResize = false;
-	// Memoized text of committed scrollback rows, keyed by absolute offset. An
-	// offset's content is stable until a resize (rewrap), a recreate (clear),
-	// or an ED3 history clear (renumbers offsets) — all reset this. Eliminates
-	// the per-op O(history) WASM re-reads that made long streaming runs O(n²)
-	// in committed rows.
+	// Memoized text of committed scrollback rows, keyed by absolute offset. A
+	// resize, clear, or bounded-history eviction renumbers offsets; those paths
+	// reset this cache. Eliminates the per-op O(history) WASM re-reads that made
+	// long streaming runs O(n²) in committed rows.
 	#historyTextCache: string[] = [];
 
 	constructor(columns = 80, rows = 24, scrollback?: number) {
@@ -353,6 +352,7 @@ export class VirtualTerminal implements Terminal {
 			this.#historyTextCache.length = 0;
 		}
 		this.#term.write(this.#stripSynchronizedOutput(data));
+		if (this.#term.scrollbackLength >= this.#scrollbackCap) this.#historyTextCache.length = 0;
 		this.#refollowBottom(wasBottom);
 	}
 
