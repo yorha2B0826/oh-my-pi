@@ -94,6 +94,7 @@ import {
 import { humanizePlanTitle, type PlanApprovalDetails, resolvePlanTitle } from "../plan-mode/approved-plan";
 import { resolvePlanModelTransition } from "../plan-mode/model-transition";
 import guidedGoalInterviewPrompt from "../prompts/goals/guided-goal-interview.md" with { type: "text" };
+import planFilenamePrompt from "../prompts/system/plan-filename.md" with { type: "text" };
 import planModeApprovedPrompt from "../prompts/system/plan-mode-approved.md" with { type: "text" };
 import planModeCompactInstructionsPrompt from "../prompts/system/plan-mode-compact-instructions.md" with {
 	type: "text",
@@ -122,8 +123,8 @@ import { agentTypeBadge, formatTaskId } from "../task/render";
 import type { ConfiguredThinkingLevel } from "../thinking";
 import { tinyTitleClient } from "../tiny/title-client";
 import type { LspStartupServerInfo } from "../tools";
-import { normalizeLocalScheme } from "../tools/path-utils";
-import { formatMoreItems, replaceTabs, TRUNCATE_LENGTHS, truncateToWidth } from "../tools/render-utils";
+import { normalizeLocalScheme, resolveToCwd } from "../tools/path-utils";
+import { formatMoreItems, replaceTabs, shortenPath, TRUNCATE_LENGTHS, truncateToWidth } from "../tools/render-utils";
 import { setAutoQaConsentHandler } from "../tools/report-tool-issue";
 import {
 	formatPhaseDisplayName,
@@ -167,6 +168,7 @@ import type { HookEditorComponent } from "./components/hook-editor";
 import type { HookInputComponent } from "./components/hook-input";
 import type { HookSelectorComponent, HookSelectorSlider } from "./components/hook-selector";
 import { type PlanReviewAnnotationState, PlanReviewOverlay } from "./components/plan-review-overlay";
+import { PlanSaveOverlay, type PlanSaveOverlayResult } from "./components/plan-save-overlay";
 import { StatusLineComponent } from "./components/status-line";
 import { stopSharedSpinnerTicker, type ToolExecutionHandle } from "./components/tool-execution";
 import { TranscriptContainer } from "./components/transcript-container";
@@ -340,6 +342,37 @@ type GoalSubcommand = "set" | "show" | "pause" | "resume" | "drop" | "budget";
 const GOAL_SUBCOMMANDS = new Set<GoalSubcommand>(["set", "show", "pause", "resume", "drop", "budget"]);
 const PLAN_KEEP_CONTEXT_OPTION_INDEX = 2;
 const PLAN_KEEP_CONTEXT_DISABLE_THRESHOLD_PERCENT = 95;
+const PLAN_SAVE_AND_QUIT_OPTION = "Save and quit";
+const PLAN_SAVE_TITLE_LINE_LIMIT = 6;
+
+const PLAN_SAVE_STEM_MAX_LENGTH = 32;
+const PLAN_FILENAME_SYSTEM_PROMPT = prompt.render(planFilenamePrompt);
+/** Suggested save filename for an approved plan: `<TOPIC>_PLAN.md` from the
+ *  tiny-model topic (e.g. `PYO3_METHODS_PLAN.md`), trimmed to a word boundary
+ *  when a verbose fallback title sneaks through. */
+export function planSaveFileName(title: string): string {
+	let stem = title
+		.normalize("NFC")
+		.replace(/[^\p{L}\p{N}]+/gu, "_")
+		.replace(/_+/g, "_")
+		.replace(/^_+|_+$/g, "")
+		.toUpperCase();
+	if (stem.length > PLAN_SAVE_STEM_MAX_LENGTH) {
+		const cut = stem.lastIndexOf("_", PLAN_SAVE_STEM_MAX_LENGTH);
+		stem = cut > 0 ? stem.slice(0, cut) : stem.slice(0, PLAN_SAVE_STEM_MAX_LENGTH);
+	}
+	if (!stem || stem === "PLAN") return "PLAN.md";
+	return `${stem.endsWith("_PLAN") ? stem : `${stem}_PLAN`}.md`;
+}
+
+function planSaveTitleExcerpt(planContent: string): string {
+	return planContent
+		.split(/\r?\n/)
+		.map(line => line.trim())
+		.filter(Boolean)
+		.slice(0, PLAN_SAVE_TITLE_LINE_LIMIT)
+		.join("\n");
+}
 
 function parseGoalSubcommand(args: string): { sub: GoalSubcommand | undefined; rest: string } {
 	const trimmed = args.trim();
@@ -3315,6 +3348,82 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 	}
 
+	async #promptPlanSavePath(planContent: string, title: string): Promise<string | undefined> {
+		let suggestedPath = planSaveFileName(title);
+		let overlay: PlanSaveOverlay | undefined;
+		const excerpt = planSaveTitleExcerpt(planContent);
+		if (excerpt) {
+			void this.session
+				.generateTitle(excerpt, PLAN_FILENAME_SYSTEM_PROMPT)
+				.then(generatedTitle => {
+					if (!generatedTitle) return;
+					suggestedPath = planSaveFileName(generatedTitle);
+					overlay?.setSuggestedPath(suggestedPath);
+					this.ui.requestRender();
+				})
+				.catch(error => {
+					logger.debug("plan-save: filename generation failed", {
+						error: error instanceof Error ? error.message : String(error),
+					});
+				});
+		}
+		try {
+			const result = await this.showHookCustom<PlanSaveOverlayResult | undefined>(
+				(_tui, _theme, _keybindings, done) => {
+					overlay = new PlanSaveOverlay(suggestedPath, done);
+					return overlay;
+				},
+				{ overlay: true },
+			);
+			return result?.path;
+		} finally {
+			overlay = undefined;
+		}
+	}
+
+	async #savePlanAndQuit(planContent: string, title: string, annotationStateKey: string): Promise<void> {
+		const selectedPath = await this.#promptPlanSavePath(planContent, title);
+		if (!selectedPath) return;
+
+		let destination: string;
+		try {
+			destination = resolveToCwd(selectedPath, this.sessionManager.getCwd());
+		} catch (error) {
+			this.showError(`Invalid plan save path: ${error instanceof Error ? error.message : String(error)}`);
+			return;
+		}
+		try {
+			await Bun.write(destination, planContent);
+		} catch (error) {
+			this.showError(
+				`Failed to save plan to ${shortenPath(destination)}: ${error instanceof Error ? error.message : String(error)}`,
+			);
+			return;
+		}
+		try {
+			await this.#exitPlanMode({ silent: true });
+		} catch (error) {
+			this.showError(
+				`Saved plan to ${shortenPath(destination)}, but could not exit plan mode: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			);
+			return;
+		}
+
+		this.#planReviewAnnotationState.delete(annotationStateKey);
+		try {
+			await this.handleClearCommand();
+			this.showStatus(`Saved plan to ${shortenPath(destination)}.`);
+		} catch (error) {
+			this.showError(
+				`Saved plan to ${shortenPath(destination)}, but could not start a new session: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			);
+		}
+	}
+
 	async #openPlanInExternalEditor(planFilePath: string): Promise<void> {
 		const editorCmd = getEditorCommand();
 		if (!editorCmd) {
@@ -4173,7 +4282,13 @@ export class InteractiveMode implements InteractiveModeContext {
 		const choice = await this.showPlanReview(
 			planContent,
 			"Plan mode - next step",
-			["Approve and execute", "Approve and compact context", keepContextLabel, "Refine plan"],
+			[
+				"Approve and execute",
+				"Approve and compact context",
+				keepContextLabel,
+				"Refine plan",
+				PLAN_SAVE_AND_QUIT_OPTION,
+			],
 			{
 				helpText,
 				onExternalEditor: () => void this.#openPlanInExternalEditor(planFilePath),
@@ -4197,6 +4312,21 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.#hidePlanReview();
 			this.ui.requestRender();
 		};
+
+		if (choice === PLAN_SAVE_AND_QUIT_OPTION) {
+			closePlanReview();
+			try {
+				const latestPlanContent = editedContent ?? (await this.#readPlanFile(planFilePath));
+				if (latestPlanContent === null) {
+					this.showError(`Plan file not found at ${planFilePath}`);
+					return;
+				}
+				await this.#savePlanAndQuit(latestPlanContent, details.title, annotationStateKey);
+			} catch (error) {
+				this.showError(`Failed to save plan: ${error instanceof Error ? error.message : String(error)}`);
+			}
+			return;
+		}
 
 		if (choice === "Approve and execute" || choice === "Approve and compact context" || choice === keepContextLabel) {
 			try {

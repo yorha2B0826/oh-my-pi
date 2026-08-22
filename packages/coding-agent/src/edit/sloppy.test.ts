@@ -377,6 +377,55 @@ describe("sloppy v8", () => {
 
 		expect(variant.apply(content, input, context)).toBe("alpha();\ninserted();\nbeta();\ndelta();\n");
 	});
+	test("keeps a diff-shaped body away from missing-separator recovery", () => {
+		// Regression: a uniquely matching context prefix let missing-» recovery
+		// adopt the collapsed remainder as a rewrite — deleting the prefix,
+		// writing the diff context gap `…` into the file literally, and leaving
+		// the original block in place as a duplicate.
+		const content = [
+			"fn load() {",
+			"\tlet mut items = Vec::new();",
+			"\tfor entry in dir {",
+			"\t\tlet parsed = entry.parse();",
+			"\t\titems.push(parsed);",
+			"\t}",
+			"\titems.sort();",
+			"\tOk(items)",
+			"}",
+			"",
+		].join("\n");
+		const input = [
+			M.open,
+			"fn load() {",
+			"-\tlet mut items = Vec::new();",
+			"+\tlet mut items = Vec::new();",
+			"\tfor entry in dir {",
+			M.gap,
+			"-\t\titems.push(parsed);",
+			"+\t\titems.push((entry.name(), parsed));",
+			"\t}",
+			"-\titems.sort();",
+			"-\tOk(items)",
+			"+\titems.sort_by_key(|(name, _)| name.clone());",
+			"+\tOk(items.into_iter().map(|(_, item)| item).collect())",
+			"}",
+		].join("\n");
+
+		expect(variant.apply(content, input, context)).toBe(
+			[
+				"fn load() {",
+				"\tlet mut items = Vec::new();",
+				"\tfor entry in dir {",
+				"\t\tlet parsed = entry.parse();",
+				"\t\titems.push((entry.name(), parsed));",
+				"\t}",
+				"\titems.sort_by_key(|(name, _)| name.clone());",
+				"\tOk(items.into_iter().map(|(_, item)| item).collect())",
+				"}",
+				"",
+			].join("\n"),
+		);
+	});
 
 	test("clamps a bare desired selection at line end to its own line", () => {
 		// Regression: the captured gap ran past the newline and spliced two lines
@@ -1002,6 +1051,16 @@ describe("sloppy v8", () => {
 		expect(variant.apply(content, operation(pattern, rewrite), context)).toBe(
 			"if (newA) {\n  keep();\n  return newB;\n}\n",
 		);
+	});
+
+	test("fails closed on a whole-line rewrite gap when the pattern captured none", () => {
+		// Regression: an explicit » rewrite with `…` context elision against a
+		// gapless MATCH wrote literal `…` lines into the file and duplicated the
+		// blocks the gaps had elided.
+		const content = "use std::time::Duration;\n\nfn combined() {}\n";
+		const input = operation("use std::time::Duration;", "use std::{sync::Arc, time::Duration};\n…\nfn combined() {}");
+
+		expect(() => variant.apply(content, input, context)).toThrow(/whole-line … with no MATCH gap to re-emit/);
 	});
 
 	test("fails closed when a multi-selection rewrite proves neither interpretation", () => {

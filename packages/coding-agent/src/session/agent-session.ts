@@ -6753,8 +6753,10 @@ export class AgentSession {
 	 * Generate an automatic session title tied to this session's lifecycle.
 	 * Input and replan callers share the signal so disposal cancels provider and
 	 * local-worker requests instead of leaving background inference alive.
+	 * `customSystemPrompt` swaps the title prompt for special-purpose titling
+	 * (e.g. plan-save filename topics) without touching the session override.
 	 */
-	generateTitle(firstMessage: string): Promise<string | null> {
+	generateTitle(firstMessage: string, customSystemPrompt?: string): Promise<string | null> {
 		return generateSessionTitle(
 			firstMessage,
 			this.#modelRegistry,
@@ -6762,7 +6764,7 @@ export class AgentSession {
 			this.sessionId,
 			this.model,
 			provider => this.agent.metadataForProvider(provider),
-			this.#titleSystemPrompt,
+			customSystemPrompt ?? this.#titleSystemPrompt,
 			this.#titleGenerationAbortController.signal,
 		);
 	}

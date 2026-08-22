@@ -8,6 +8,7 @@ import { routeWriteThroughBridge } from "../tools/acp-bridge";
 import { invalidateFsScanAfterWrite } from "../tools/fs-cache-invalidation";
 import { outputMeta } from "../tools/output-meta";
 import { enforcePlanModeWrite, resolvePlanPath } from "../tools/plan-mode-guard";
+import type { AppliedEditObserver } from "./blackbox";
 import { type DiffError, type DiffResult, generateDiffString } from "./diff";
 import { levenshteinDistance } from "./modes/replace";
 import { detectLineEnding, normalizeToLF, normalizeUnicode, restoreLineEndings, stripBom } from "./normalize";
@@ -428,6 +429,11 @@ function recoverMissingSeparator(
 	lines: string[],
 	content: string,
 ): { patternText: string; rewrite: string } | undefined {
+	// A unified-diff-shaped body is a foreign dialect, not a forgotten `»`:
+	// splitting it at a matching context prefix splices the collapsed remainder
+	// after the prefix, leaving the real block in place (duplication) and
+	// writing diff context gaps literally. Let the diff reinterpretation own it.
+	if (isDiffShaped(lines.join("\n"))) return undefined;
 	const candidates: Array<{ patternText: string; rewrite: string }> = [];
 	for (let split = 1; split < lines.length; split++) {
 		let remainderStart = split;
@@ -438,6 +444,9 @@ function recoverMissingSeparator(
 		// A gap-only remainder is context elision, never final text; adopting it
 		// as the rewrite would write literal `…` into the file.
 		if (patternText.length < 4 || rewrite.replaceAll(GAP, "").trim() === "") continue;
+		// Same for any whole line that is only gaps: a recovered rewrite is never
+		// authored final text, so a `…` line in it means elided context.
+		if (rewrite.split("\n").some(line => line.trim() !== "" && line.trim().replaceAll(GAP, "") === "")) continue;
 		const matches = exactOccurrences(content, patternText);
 		if (matches.length !== 1) continue;
 		const throughFirstRewriteLine = normalizeBlock(lines.slice(0, remainderStart + 1), false);
@@ -2319,6 +2328,18 @@ function renderRewrite(
 	for (let index = 0; index < rewrite.length; ) {
 		const gapMarker = rewrite.startsWith(GAP, index) ? GAP : undefined;
 		if (gapMarker) {
+			if (markerIndex >= sentinels.length) {
+				// An unclaimed gap alone on its line is context elision, never final
+				// text; writing it verbatim splices a literal `…` into the file.
+				const lineStart = rewrite.lastIndexOf("\n", index - 1) + 1;
+				const nextNewline = rewrite.indexOf("\n", index);
+				const line = rewrite.slice(lineStart, nextNewline === -1 ? rewrite.length : nextNewline);
+				if (line.trim() === GAP) {
+					throw new Error(
+						`Operation ${operationNumber} REWRITE has a whole-line ${GAP} with no MATCH gap to re-emit. REWRITE is final text written verbatim: type the elided lines out, or add a matching ${GAP} gap to MATCH. To write a literal ${GAP} line, use the write tool.`,
+					);
+				}
+			}
 			marked += markerIndex < sentinels.length ? sentinels[markerIndex] : gapMarker;
 			markerIndex++;
 			index += gapMarker.length;
@@ -2908,14 +2929,22 @@ function trailingSelectionCandidate(patternText: string): string | undefined {
  * lone `+` run becomes add lines, `@@` becomes a gap, and diff file headers
  * drop. Returns candidates with and without the diff context-space stripped.
  */
+function isDiffShaped(patternText: string): boolean {
+	if (patternText.includes(SELECT_OPEN) || patternText.includes(ADD_LINE)) return false;
+	const lines = patternText.split("\n");
+	if (!lines.some(line => /^-(?!--)/u.test(line))) return false;
+	return (
+		lines.some(line => /^\+(?!\+\+)/u.test(line)) ||
+		lines.some(line => line.trim().startsWith("@@")) ||
+		lines.some(line => /^ \S/u.test(line))
+	);
+}
+
 function diffShapedCandidates(patternText: string): string[] {
+	if (!isDiffShaped(patternText)) return [];
 	const lines = patternText.split("\n");
 	const isMinus = (line: string) => /^-(?!--)/u.test(line);
 	const isPlus = (line: string) => /^\+(?!\+\+)/u.test(line);
-	const hasHunk = lines.some(line => line.trim().startsWith("@@"));
-	const hasSpacedContext = lines.some(line => /^ \S/u.test(line));
-	if (!lines.some(isMinus) || !(lines.some(isPlus) || hasHunk || hasSpacedContext)) return [];
-	if (patternText.includes(SELECT_OPEN) || patternText.includes(ADD_LINE)) return [];
 	const build = (stripContextSpace: boolean): string => {
 		const out: string[] = [];
 		for (let index = 0; index < lines.length; index++) {
@@ -3543,6 +3572,8 @@ export interface ExecuteSloppyOptions {
 	batchRequest?: LspBatchRequest;
 	writethrough: WritethroughCallback;
 	beginDeferredDiagnosticsForPath: (path: string) => WritethroughDeferredHandle;
+	/** Observes a committed content transition before result snapshots are pruned. */
+	onApplied?: AppliedEditObserver;
 }
 
 interface PreparedSloppySection {
@@ -3566,7 +3597,8 @@ interface PreparedSloppySection {
 export async function executeSloppy(
 	options: ExecuteSloppyOptions,
 ): Promise<AgentToolResult<EditToolDetails, SloppyParams>> {
-	const { session, sections, signal, batchRequest, writethrough, beginDeferredDiagnosticsForPath } = options;
+	const { session, sections, signal, batchRequest, writethrough, beginDeferredDiagnosticsForPath, onApplied } =
+		options;
 	const multiFile = sections.length > 1;
 
 	// Phase 1 — preflight every section in memory; nothing is written unless all succeed.
@@ -3647,6 +3679,7 @@ export async function executeSloppy(
 		}
 
 		const diffResult = generateDiffString(entry.normalizedContent, entry.newContent, undefined, { path: entry.path });
+		await onApplied?.({ path: entry.absolutePath, prev: entry.rawContent, next: finalContent });
 		const meta = outputMeta()
 			.diagnostics(diagnostics?.summary ?? "", diagnostics?.messages ?? [])
 			.get();

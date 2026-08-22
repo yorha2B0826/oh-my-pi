@@ -3556,6 +3556,16 @@ export const SETTINGS_SCHEMA = {
 			description: "Reject edits anchored on lines a prior read/search never displayed in full",
 		},
 	},
+	"edit.blackbox.enabled": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "files",
+			group: "Editing",
+			label: "Record Parse Regressions",
+			description: "Append full before/after source when an edit introduces an AST parse failure",
+		},
+	},
 
 	readLineNumbers: {
 		type: "boolean",
