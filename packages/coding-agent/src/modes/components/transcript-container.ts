@@ -50,6 +50,11 @@ interface FinalizableBlock {
 	 * no longer possible, and an unfinalized block would otherwise pin the
 	 * live-region seam open for the rest of the turn (every row committed
 	 * below it audit-exempt, mass-recommitted when it finally finalizes).
+	 * A displaceable block with visible content below it also stops gating
+	 * the pinned commit ceiling: freezing commits at an interior snapshot
+	 * would strand every later row outside native scrollback (lost on exit,
+	 * invisible to scrollback mid-turn), which is strictly worse than the
+	 * stacked follow-up card sealing costs.
 	 */
 	isDisplaceableBlock?(): boolean;
 	/** Finalize a displaceable snapshot in place (settle animation, freeze bytes). */
@@ -549,6 +554,10 @@ export class TranscriptContainer
 		// Frame row cursor: rows emitted (reused or pushed) so far.
 		let row = 0;
 		let stableRows = 0;
+		// Pinned live blocks noted during the walk; resolved into the single
+		// gating boundary after the walk, once every block's visibility is
+		// known (see the resolution below).
+		let pinCandidates: { index: number; pinAt: number }[] | undefined;
 		for (let i = 0; i < count; i++) {
 			const child = this.children[i]!;
 
@@ -599,7 +608,10 @@ export class TranscriptContainer
 				if (hasLiveBlock && i === liveStartIndex) {
 					this.#nativeScrollbackLiveRegionStart = row;
 				}
-				if (!finalized && isBlockPinned(child)) this.#notePinnedLiveBlock(row);
+				if (!finalized && isBlockPinned(child)) {
+					if (pinCandidates === undefined) pinCandidates = [];
+					pinCandidates.push({ index: i, pinAt: row });
+				}
 				if (chainStable && !(reusable && previous.rowCount === 0 && previous.startRow === row)) {
 					chainStable = false;
 					lines.length = row;
@@ -644,7 +656,10 @@ export class TranscriptContainer
 			if (hasLiveBlock && i === liveStartIndex) {
 				this.#nativeScrollbackLiveRegionStart = row + sep + settled;
 			}
-			if (!finalized && isBlockPinned(child)) this.#notePinnedLiveBlock(row + sep + settled);
+			if (!finalized && isBlockPinned(child)) {
+				if (pinCandidates === undefined) pinCandidates = [];
+				pinCandidates.push({ index: i, pinAt: row + sep + settled });
+			}
 
 			const rowCount = sep + contribution.length;
 			const stable = chainStable && reusable && previous.startRow === row && previous.sep === sep;
@@ -677,6 +692,33 @@ export class TranscriptContainer
 		// when every surviving segment was reused.
 		if (lines.length !== row) lines.length = row;
 		this.#segments = segments;
+		// Resolve the pinned boundary: the first candidate that may gate wins.
+		// A pinned displaceable snapshot (todo/poll card) with visible content
+		// below it must NOT gate — the engine freezes all commits at the
+		// boundary, so an interior snapshot would strand every later row
+		// outside native scrollback for as long as it lives (rows scrolled
+		// past the window never reach terminal history and are lost if the
+		// session exits first). Left unpinned, its rows commit only when the
+		// window scrolls past them; the seal pass above then finalizes it and
+		// the next matching call stacks a fresh card instead of retracting.
+		// Tail pins and non-displaceable pins (vibe_wait wall, live task,
+		// pending hub wait) keep the hard ceiling: their self-replacing
+		// frames stay out of history entirely.
+		if (pinCandidates) {
+			let lastVisible = -1;
+			for (let i = count - 1; i >= 0; i--) {
+				if (segments[i]!.rowCount > 0) {
+					lastVisible = i;
+					break;
+				}
+			}
+			for (const candidate of pinCandidates) {
+				const block = this.children[candidate.index]! as Component & FinalizableBlock;
+				if (candidate.index < lastVisible && block.isDisplaceableBlock?.() === true) continue;
+				this.#notePinnedLiveBlock(candidate.pinAt);
+				break;
+			}
+		}
 		this.#stableRowsFloor = Math.min(stableFloorBefore, stableRows, row);
 		return lines;
 	}

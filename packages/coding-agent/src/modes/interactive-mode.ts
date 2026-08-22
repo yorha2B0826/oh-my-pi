@@ -872,7 +872,9 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.hookWidgetContainerAbove.addChild(new Spacer(1));
 		this.hookWidgetContainerBelow = new Container();
 		this.attachmentChipsContainer = new Container();
-		this.attachmentChipsContainer.addChild(new AttachmentChipsBand(this.editor, this.ui.imageBudget));
+		this.attachmentChipsContainer.addChild(
+			new AttachmentChipsBand(this.editor, this.ui.imageBudget, () => this.ui.requestRender()),
+		);
 		// Restored drafts (esc-esc, /tree, branch) re-materialize blob-store links off the render
 		// path so their chip tokens become clickable again instead of degrading to dead text.
 		this.editor.draftImageLinkMaterializer = images =>

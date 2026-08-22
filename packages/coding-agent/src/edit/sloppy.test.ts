@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import type { ToolSession } from "../tools";
 import {
+	applySloppy,
 	computeSloppySectionDiff,
 	executeSloppy,
 	SLOPPY_MARKERS,
@@ -44,6 +45,402 @@ describe("sloppy v8", () => {
 
 		expect(variant.apply(content, input, context)).toBe(
 			"const value = newCall(options) ?? fallback;\nreport(value);\n",
+		);
+	});
+
+	test("inserts an add line after its anchor", () => {
+		const content = "anyhow = { workspace = true }\nitertools = { workspace = true }\ntokio = { workspace = true }\n";
+		const input = inlineOperation("itertools = { workspace = true }\n＋jiff = { workspace = true }");
+
+		expect(variant.apply(content, input, context)).toBe(
+			"anyhow = { workspace = true }\nitertools = { workspace = true }\njiff = { workspace = true }\ntokio = { workspace = true }\n",
+		);
+	});
+
+	test("keeps a run of add lines in authored order", () => {
+		const content = "first();\nlast();\n";
+		const input = inlineOperation("first();\n＋second();\n＋third();\nlast();");
+
+		expect(variant.apply(content, input, context)).toBe("first();\nsecond();\nthird();\nlast();\n");
+	});
+
+	test("keeps an add line's indentation from either marker style", () => {
+		const content = "fn main() {\n    setup();\n}\n";
+		const indentedMarker = inlineOperation("    setup();\n    ＋run();");
+		const columnZeroMarker = inlineOperation("    setup();\n＋    run();");
+
+		expect(variant.apply(content, indentedMarker, context)).toBe("fn main() {\n    setup();\n    run();\n}\n");
+		expect(variant.apply(content, columnZeroMarker, context)).toBe("fn main() {\n    setup();\n    run();\n}\n");
+	});
+
+	test("mixes add lines with inline replacements in one operation", () => {
+		const content = "const retries = 3;\nrun();\n";
+		const input = inlineOperation("const retries = ⟪3│5⟫;\n＋const backoff = 250;");
+
+		expect(variant.apply(content, input, context)).toBe("const retries = 5;\nconst backoff = 250;\nrun();\n");
+	});
+
+	test("replaces a contained region through one multi-line selection", () => {
+		const content =
+			"function displayName(user) {\n  if (!user) {\n    return fallback;\n  }\n  return user.name;\n}\n";
+		const input = inlineOperation(
+			"  ⟪if (!user) {\n    return fallback;\n  }\n  return user.name;│return user?.name ?? fallback;⟫\n}",
+		);
+
+		expect(variant.apply(content, input, context)).toBe(
+			"function displayName(user) {\n  return user?.name ?? fallback;\n}\n",
+		);
+	});
+
+	test("strips a diff-habit add marker from REWRITE lines", () => {
+		// Regression: ＋-prefixed REWRITE lines were written verbatim, leaving
+		// literal ＋ markers in the file.
+		const content = "start();\nmiddle();\nend();\n";
+		const input = operation("middle();", "＋replacement();\n＋more();");
+
+		expect(variant.apply(content, input, context)).toBe("start();\nreplacement();\nmore();\nend();\n");
+	});
+
+	test("drops apply-patch end-of-edit sentinels from the payload", () => {
+		const content = "start();\nmiddle();\nend();\n";
+		const input = `${operation("middle();", "replacement();")}\n*** End of edit`;
+
+		expect(variant.apply(content, input, context)).toBe("start();\nreplacement();\nend();\n");
+	});
+
+	test("applies a REWRITE written as a selection directive list inside the MATCH", () => {
+		// Real gpt-oss shape: MATCH retypes the block, REWRITE lists ⟪old│new⟫
+		// pairs; longest old wins overlapping targets, each hits every occurrence.
+		const content = "const entries = avlue\n  ? avlue.models\n  : avlue;\n";
+		const input = [
+			M.open,
+			"const entries = avlue",
+			"  ? avlue.models",
+			"  : avlue;",
+			M.put,
+			`⟪avlue│value⟫`,
+			`⟪avlue.models│value.models⟫`,
+		].join("\n");
+
+		expect(variant.apply(content, input, context)).toBe("const entries = value\n  ? value.models\n  : value;\n");
+	});
+
+	test("merges a pure deletion with a contained sibling rewrite into a union replace", () => {
+		// Recurring swap shape: op1 deletes the whole region, op2 restates it
+		// reordered; sequential application and union-replace are byte-identical.
+		const content = "function alpha() {\n  return 1;\n}\n\nfunction beta() {\n  return 2;\n}\n";
+		const input = [
+			M.open,
+			"function alpha() {",
+			"  return 1;",
+			"}",
+			"",
+			"function beta() {",
+			"  return 2;",
+			"}",
+			M.put,
+			M.open,
+			"function beta() {",
+			"  return 2;",
+			"}",
+			M.put,
+			"function beta() {",
+			"  return 2;",
+			"}",
+			"",
+			"function alpha() {",
+			"  return 1;",
+			"}",
+		].join("\n");
+
+		expect(variant.apply(content, input, context)).toBe(
+			"function beta() {\n  return 2;\n}\n\nfunction alpha() {\n  return 1;\n}\n",
+		);
+	});
+
+	test("defers an ambiguous op and resolves it against sibling claims", () => {
+		// `? avlue` matches two sites; a sibling op explicitly claims the
+		// `.models` site, so the deferred retry resolves to the free one.
+		const content = "    ? avlue\n      ? avlue.models\n";
+		const input = [M.open, `    ? ⟪avlue│value⟫`, M.open, `      ? ⟪avlue│value⟫.models`].join("\n");
+
+		expect(variant.apply(content, input, context)).toBe("    ? value\n      ? value.models\n");
+	});
+
+	test("moves a block via delete plus add lines with blank-separated seams", () => {
+		// Move idiom without registers: elided closing brace, blank context, and
+		// EOF deletion must all land byte-exact.
+		const content =
+			"function make() {\n  return 1;\n}\n\nexport function target() {\n  return 2;\n}\n\nexport function moved() {\n  return 3;\n}\n";
+		const input = [
+			M.open,
+			"export function moved() {",
+			"  return 3;",
+			"}",
+			M.put,
+			M.open,
+			"  return 1;",
+			"}",
+			"＋",
+			"＋export function moved() {",
+			"＋  return 3;",
+			"＋}",
+			"export function target() {",
+		].join("\n");
+
+		expect(variant.apply(content, input, context)).toBe(
+			"function make() {\n  return 1;\n}\n\nexport function moved() {\n  return 3;\n}\n\nexport function target() {\n  return 2;\n}\n",
+		);
+	});
+
+	test("recovers guillemets used as brackets around old and new blocks", () => {
+		// Real gpt-oss shape: « old » « new » — both blocks wrapped instead of
+		// MATCH » REWRITE; literally it reads as two deletions.
+		const content = "function alpha() {\n  return 1;\n}\nfunction beta() {\n  return 2;\n}\n";
+		const input = [
+			M.open,
+			"function alpha() {",
+			"  return 1;",
+			"}",
+			M.put,
+			M.open,
+			"function alpha() {",
+			"  return 42;",
+			"}",
+			M.put,
+		].join("\n");
+
+		expect(variant.apply(content, input, context)).toBe(
+			"function alpha() {\n  return 42;\n}\nfunction beta() {\n  return 2;\n}\n",
+		);
+	});
+
+	test("ignores a stray close-bracket separator after the final rewrite", () => {
+		const content = "const value = 1;\n";
+		const input = [M.open, "const value = 1;", M.put, "const value = 2;", M.put].join("\n");
+
+		expect(variant.apply(content, input, context)).toBe("const value = 2;\n");
+	});
+
+	test("drops decoding noise between a split End sentinel and a Begin retry", () => {
+		// Real degeneracy: `***` and ` End Patch` split across lines, spam text,
+		// then a clean self-retry of the same edit in one payload.
+		const content = "  if (globalThis.crypto.getRandomValues) {\n    use();\n  }\n";
+		const payload = [
+			"*** Begin Patch",
+			"[uuid.ts]",
+			M.open,
+			`  if (globalThis.crypto.⟪getRandomValues│randomValues⟫) {`,
+			"***",
+			" End Patch",
+			" stray commentary the model appended",
+			"*** Begin Patch",
+			"[uuid.ts]",
+			M.open,
+			`  if (globalThis.crypto.⟪getRandomValues│randomValues⟫) {`,
+			"*** End Patch",
+		].join("\n");
+		const sections = splitSloppySections(payload);
+
+		expect(sections.map(section => section.path)).toEqual(["uuid.ts"]);
+		expect(variant.apply(content, sections[0].body, context)).toBe(
+			"  if (globalThis.crypto.randomValues) {\n    use();\n  }\n",
+		);
+	});
+
+	test("reads a bare selection in a rewrite-less op as the desired text", () => {
+		// Models state only the replacement inside the markers (`i⟪--⟫`); with
+		// no REWRITE the current span is captured as a gap and replaced.
+		const content = "for (let i = 0; i < 100; i++) {\n  run(a, b);\n}\n";
+		const input = [M.open, `for (let i = 0; i < 100; i⟪--⟫) {`, M.open, `  run(⟪b, a⟫);`].join("\n");
+
+		expect(variant.apply(content, input, context)).toBe("for (let i = 0; i < 100; i--) {\n  run(b, a);\n}\n");
+	});
+
+	test("reads an added near-variant line as a replacement of its anchor", () => {
+		// diff -/+ habit re-skinned with the add marker: same tokens, mutated
+		// operators/order → replace; different tokens → genuine insert.
+		const content = "    if (leafId !== null || !(await this.getEntry(leafId))) {\n";
+		const input = inlineOperation(
+			"    if (leafId !== null || !(await this.getEntry(leafId))) {\n＋    if (leafId !== null && !(await this.getEntry(leafId))) {",
+		);
+
+		expect(variant.apply(content, input, context)).toBe(
+			"    if (leafId !== null && !(await this.getEntry(leafId))) {\n",
+		);
+	});
+
+	test("keeps an added sibling line with different tokens as an insert", () => {
+		const content = "anyhow = { workspace = true }\nitertools = { workspace = true }\n";
+		const input = inlineOperation("itertools = { workspace = true }\n＋jiff = { workspace = true }");
+
+		expect(variant.apply(content, input, context)).toBe(
+			"anyhow = { workspace = true }\nitertools = { workspace = true }\njiff = { workspace = true }\n",
+		);
+	});
+
+	test("fails closed on a marker-less op that already matches the file", () => {
+		// A restated unchanged line asserts nothing; the merged dialect keeps the
+		// fail-closed separator diagnosis instead of silently skipping.
+		const content = "keep();\nconst limit = options.limit;\n";
+
+		expect(() =>
+			applySloppy(content, "§\nkeep();\n§\nconst limit = options⟪.│?.⟫limit;", { path: "i.ts", notes: [] }),
+		).toThrow(/needs »/);
+	});
+
+	test("collapses back-to-back duplicates when desired text matches both copies", () => {
+		// Ambiguity between two adjacent identical copies means dedup intent.
+		const content = "fn() {\n  run(a);\n\n  run(a);\n}\n";
+		const notes: string[] = [];
+
+		expect(applySloppy(content, "§\n  run(a);", { path: "d.ts", notes })).toBe("fn() {\n  run(a);\n}\n");
+		expect(notes.join("\n")).toMatch(/duplicate copy was collapsed/);
+	});
+
+	test("never rewrites part of a longer punctuation run", () => {
+		// Regression: a tolerant match once produced `i+-` by replacing half of
+		// `++`; partial-run candidates are invalid and the garble either resolves
+		// fully or fails closed.
+		const content = "for (i = 0; i < 9; i++) {\n";
+		const out = applySloppy(content, "§\nfor (i = 0; i < 9; i⟪+│-⟫) {", { path: "x.ts", notes: [] });
+
+		expect(out).toBe("for (i = 0; i < 9; i--) {\n");
+	});
+
+	test("treats candidates with whitespace-equivalent outcomes as unambiguous", () => {
+		// Deleting either of two identical blank-separated copies yields the same
+		// file; that is dedup, not ambiguity.
+		const content = "open() {\n  work(unit);\n\n  work(unit);\n}\n";
+
+		expect(applySloppy(content, "§\n⟪  work(unit);\n│⟫", { path: "d.ts", notes: [] })).toBe(
+			"open() {\n  work(unit);\n}\n",
+		);
+	});
+
+	test("applies mono marker-less desired text against the fuzzy-matched block", () => {
+		// Desired-state habit: the model writes the edited line plainly; the
+		// fuzzy match finds the near-identical original and is replaced.
+		const content = "    if (!entryRow)\n      throw invalid();\n";
+		const notes: string[] = [];
+
+		expect(applySloppy(content, "§\n    if (entryRow)\n      throw invalid();", { path: "i.ts", notes })).toBe(
+			"    if (entryRow)\n      throw invalid();\n",
+		);
+		expect(notes.join("\n")).toMatch(/desired text without markers/);
+	});
+
+	test("collapses a duplicated block stated once as mono desired text", () => {
+		const content = "run(alpha);\nrun(alpha);\ndone();\n";
+
+		expect(applySloppy(content, "§\nrun(alpha);\ndone();", { path: "m.ts" })).toBe("run(alpha);\ndone();\n");
+	});
+
+	test("recovers a unified-diff-shaped rewrite-less op as inline changes", () => {
+		// Models under pressure emit their pretrained diff schema; -/+ runs become
+		// selections, lone + runs bind to the context line above, @@ becomes a gap.
+		const content = 'function greet(name) {\n  console.log("hi " + name);\n  return name;\n}\n';
+		const input = [
+			M.open,
+			" function greet(name) {",
+			'-  console.log("hi " + name);',
+			'+  console.log("hello " + name);',
+			"+  audit(name);",
+		].join("\n");
+
+		expect(variant.apply(content, input, context)).toBe(
+			'function greet(name) {\n  console.log("hello " + name);\n  audit(name);\n  return name;\n}\n',
+		);
+	});
+
+	test("binds a diff added-run to its context line and hunk markers to gaps", () => {
+		const content = "alpha();\nbeta();\ngamma();\n";
+		const input = [M.open, " alpha();", "+inserted();", "@@", "-gamma();", "+delta();"].join("\n");
+
+		expect(variant.apply(content, input, context)).toBe("alpha();\ninserted();\nbeta();\ndelta();\n");
+	});
+
+	test("clamps a bare desired selection at line end to its own line", () => {
+		// Regression: the captured gap ran past the newline and spliced two lines
+		// together while reporting success.
+		const content = "    ? avlue\n    : typeof value === 'object' &&\n";
+		const input = inlineOperation("    ? ⟪avlue⟫\n    : typeof value === 'object' &&");
+
+		expect(() => variant.apply(content, input, context)).toThrow(/makes no change/);
+	});
+
+	test("notes an insert that duplicates adjacent lines", () => {
+		const content = "import { a } from './a';\nimport { b } from './b';\nrun();\n";
+		const input = inlineOperation(
+			"import { a } from './a';\nimport { b } from './b';\n＋import { b } from './b';\n＋import { a } from './a';",
+		);
+		const notes: string[] = [];
+
+		variant.apply(content, input, { path: "i.ts", notes });
+		expect(notes.join("\n")).toMatch(/duplicate adjacent code/);
+	});
+
+	test("reads § section openers natively, bare § continuing in the same file", () => {
+		const payload = [
+			"§src/config.ts",
+			`const timeout = ⟪1000│5000⟫;`,
+			"§",
+			`const retries = ⟪3│5⟫;`,
+			"§*src/catalog.ts",
+			`logger.⟪debug│trace⟫(`,
+		].join("\n");
+		const sections = splitSloppySections(payload);
+
+		expect(sections.map(section => section.path)).toEqual(["src/config.ts", "src/catalog.ts"]);
+		expect(sections[0].body).toContain(`${M.open}\nconst timeout`);
+		expect(sections[0].body).toContain(`${M.open}\nconst retries`);
+		expect(sections[1].body.startsWith(`${M.open}*`)).toBe(true);
+	});
+
+	test("voices sloppy errors with § openers and keeps the rewrite separator", () => {
+		let message = "";
+		try {
+			applySloppy("const x = 1;\n", "§\nconst y = 2;\nconst y = 3;", context);
+		} catch (error) {
+			message = (error as Error).message;
+		}
+		expect(message).toContain("§");
+		expect(message).not.toContain(M.open);
+		expect(message).toContain(M.put);
+	});
+
+	test("splits sections from a payload wrapped in a patch envelope", () => {
+		// Constrained decoding emits *** Begin/End Patch sentinels; the splitter
+		// must strip them before the first-line header check.
+		const payload = [
+			"*** Begin Patch",
+			"[src/a.ts]",
+			M.open,
+			"const x = 1;",
+			M.put,
+			"const x = 2;",
+			"*** End Patch",
+		].join("\n");
+
+		expect(splitSloppySections(payload).map(section => section.path)).toEqual(["src/a.ts"]);
+	});
+
+	test("trims whitespace inside a section header path", () => {
+		const sections = splitSloppySections("[ index.ts ]\n{M.open}".replace("{M.open}", M.open));
+		expect(sections.map(section => section.path)).toEqual(["index.ts"]);
+	});
+
+	test("recovers selections trailing their own retyped line with elided lines between", () => {
+		// Real gpt-oss payload shape: each edited line retyped whole with the fix
+		// annotated as a trailing selection, unchanged lines elided without gaps.
+		const content =
+			"while (true) {\n  const newlineIndex = buffer.indexOf(x);\n  if (enwlineIndex === -1) {\n    return;\n  }\n  buffer = buffer.slice(enwlineIndex + 1);\n}\n";
+		const input = inlineOperation(
+			"  const newlineIndex = buffer.indexOf(x);\n  if (enwlineIndex === -1) {⟪enwlineIndex│newlineIndex⟫\n  }\n  buffer = buffer.slice(enwlineIndex + 1);⟪enwlineIndex│newlineIndex⟫",
+		);
+
+		expect(variant.apply(content, input, context)).toBe(
+			"while (true) {\n  const newlineIndex = buffer.indexOf(x);\n  if (newlineIndex === -1) {\n    return;\n  }\n  buffer = buffer.slice(newlineIndex + 1);\n}\n",
 		);
 	});
 
@@ -514,16 +911,13 @@ describe("sloppy v8", () => {
 		expect(notes.join("\n")).toMatch(/operation 1 combined [\s\S]* applied as the final text/);
 	});
 
-	test("rejects mixed inline and bare selections", () => {
+	test("applies a bare selection beside inline pairs as desired text", () => {
+		// In a rewrite-less op a bare ⟪X⟫ states the desired text; the current
+		// span is captured as a gap and replaced.
 		const content = "const value = oldValue;\nconst other = oldOther;\n";
+		const input = inlineOperation("const value = ⟪oldValue│newValue⟫;\nconst other = ⟪newOther⟫;");
 
-		expect(() =>
-			variant.apply(
-				content,
-				inlineOperation("const value = ⟪oldValue│newValue⟫;\nconst other = ⟪oldOther⟫;"),
-				context,
-			),
-		).toThrow(/mixes inline and bare selections/);
+		expect(variant.apply(content, input, context)).toBe("const value = newValue;\nconst other = newOther;\n");
 	});
 
 	test("substitutes multiple selections positionally when REWRITE has one line per selection", () => {
@@ -889,7 +1283,9 @@ describe("sloppy v8", () => {
 		const content = "const value = oldValue;\nreport(value);\n";
 		const pattern = "const value = …⟪oldValue⟫…\nreport(value)";
 
-		expect(() => variant.apply(content, `${M.open}\n${pattern}`, context)).toThrow(new RegExp(`needs ${esc(M.put)}`));
+		expect(() => variant.apply(content, `${M.open}\nreport(value)`, context)).toThrow(
+			new RegExp(`needs ${esc(M.put)}`),
+		);
 		expect(() => variant.apply(content, `${operation(pattern, "nextValue")}\n${M.open} end`, context)).toThrow(
 			new RegExp(`Operation 2 needs ${esc(M.put)}`),
 		);
@@ -932,6 +1328,18 @@ describe("sloppy v8", () => {
 				"}",
 				"",
 			].join("\n"),
+		);
+	});
+
+	test("splits an indented rewrite separator glued to its content and adopts depth", () => {
+		// Luna run rb-nehdxas1: `  »  private _kittyProtocolActive = false;` inside
+		// an op body — indent before the glued separator must not turn the line
+		// into an invalid control line; the single-line rewrite re-adopts depth.
+		const content = "class T {\n  private _kittyProtocolActive = true;\n}\n";
+		const input = "§t.ts\n  private _kittyProtocolActive = true;\n  »  private _kittyProtocolActive = false;";
+
+		expect(applySloppy(content, input, { path: "t.ts", notes: [] })).toBe(
+			"class T {\n  private _kittyProtocolActive = false;\n}\n",
 		);
 	});
 
@@ -1309,7 +1717,6 @@ describe("sloppy v8", () => {
 				"",
 				"  const target = () => 2;",
 				"    finish();",
-				"",
 				"}",
 				"",
 			].join("\n"),

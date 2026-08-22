@@ -2,6 +2,35 @@
 
 ## [Unreleased]
 
+### Added
+
+- Edit tool payloads now accept `＋`-prefixed add lines to insert whole lines in place (consecutive `＋` lines insert together, both marker indent styles supported), and the prompt documents multi-line inline selections for contained restructures.
+- Edit tool now recovers common payload dialect slips instead of erroring: selections trailing their retyped line, elided unchanged lines in inline operations, guillemets used as brackets around old/new blocks, a stray trailing rewrite separator, rewrites written as replacement-directive lists, and apply-patch sentinels mixed into payloads.
+- Edit tool now defers ambiguous operations and resolves them against sibling operations' claimed spans, merges a pure deletion with a contained sibling rewrite into one union replace, reads a bare *** line as the rewrite separator, and strips split envelope sentinels plus decoding noise between an End sentinel and the next Begin.
+- Edit tool moves are now taught as delete-plus-restate; the register re-emit idiom left the prompt and constrained-decoding grammar (the engine still applies it), after benchmarks showed models inventing conflicting semantics for it.
+- Edit tool now reads a bare selection in a rewrite-less operation as the desired text: the current span is captured in place and replaced, keeping boundary whitespace outside the replacement.
+- Added an experimental `mono` edit variant: header-less `§relative/path` operation openers (bare `§` continues in the same file), inline-only changes, a real transpiler front-end, and dialect-voiced errors so retry guidance is always expressible under the mono grammar. Benchmarks with the corrected error surface still favor keeping the block form.
+- Edit tool now accepts the pretrained diff schema wherever models emit it: unified-diff-shaped operations (`@@` hunks, `-`/`+` runs, context lines) apply as inline changes, an added line that is a near-variant of its anchor replaces it instead of duplicating it, and marker-less mono operations are read as desired text against the fuzzy-matched block (satisfied assertions skip with a note).
+- Added an experimental `wdiff` edit variant speaking git word-diff (`@@ path` operation headers, `[-old-]{+new+}` inline changes, line-diff runs, `...` skips); benchmarks show block-instinct models roughly double their first-try edit success on it versus the inline-only mono dialect.
+- Edit tool now collapses back-to-back duplicate blocks when a payload states the desired text once, drops overlapping fuzzy-match artifacts of the same operation, and removes a dangling blank line left directly above a closing delimiter after a block deletion.
+- Edit tool now resolves delimiter-garbled punctuation selections against the file, rejects matches that would rewrite part of a longer punctuation run, treats candidates with whitespace-equivalent outcomes as unambiguous, recovers a dropped seam between a selection and its following text, and cleans blank lines left beside opening or closing delimiters after deletions.
+
+### Changed
+
+- Switched fallback edit mode from replace to sloppy for models that do not support hashline
+
+### Removed
+
+- Removed the experimental `wdiff` edit variant (git word-diff surface); `sloppy` is the single sparse-edit dialect.
+- Removed the experimental `mono` edit variant: its syntax and recoveries are now native to `sloppy`, which teaches `§relative/path` operation openers (bare `§` continues in the same file, `§*` for every match) instead of separate header lines, voices errors in the same vocabulary, and applies marker-less operations as desired text when the delta is punctuation-level or collapses an adjacent duplicate. Legacy bracket headers and guillemet openers remain accepted.
+
+### Fixed
+
+- Fixed collapsed edit results with long wrapped diff lines growing beyond their rendered-row budget and corrupting native Windows terminal transcript layout ([#9302](https://github.com/can1357/oh-my-pi/issues/9302)).
+- Fixed edit tool section header paths not trimming surrounding whitespace, so a header with padded brackets failed with file-not-found.
+- Fixed transcript content disappearing from terminal scrollback below a live hub-wait/todo/jobs card: the card's viewport pin froze scrollback commits at its own rows, so everything the turn streamed below it scrolled off-screen without ever entering terminal history (and was lost for good when the session exited first). A displaceable card with content below it no longer holds the commit ceiling; its rows commit as they scroll off and the card seals in place, so the next poll stacks a fresh card instead of retracting history.
+- Fixed the composer attachment chip thumbnail showing an empty box for pasted images: the paste pipeline re-encodes images as JPEG/WebP, and transmitting those bytes as Kitty PNG data made the terminal reject them (blank placeholder cells). Non-PNG attachments now convert to PNG before the thumbnail transmit, like transcript images.
+
 ## [17.4.4] - 2026-08-22
 
 ### Added
@@ -14,6 +43,7 @@
 - Fixed edit-tool whole-line inserts (an insert selection alone on its own line) splicing into the anchor line instead of landing on a new line when the anchor was the last matched line, preceded a blank line, or sat at EOF.
 - Edit tool prompt now documents whole-line insert selections and that a REWRITE `…` with no captured MATCH gap is written to the file literally.
 - Fixed multiplexer width resizes (tmux/screen/Zellij/cmux/Herdr panes) replaying the entire transcript into pane history — one duplicated transcript copy and seconds of visible scrolling per width change. The width-epoch boundary now resolves for real transcripts: finalized blocks without `getTranscriptBlockVersion` are treated as immutable per the documented contract, Container-derived blocks without a nested epoch source fall back to whole-segment stability instead of failing, and bash/eval/tool/read-group blocks report a block version for their genuine post-finalize mutations. The interactive resize listener no longer marks every SIGWINCH as "render pending", which forced the conservative replay-from-row-zero fallback on every settled resize ([#8193](https://github.com/can1357/oh-my-pi/issues/8193), [#7026](https://github.com/can1357/oh-my-pi/issues/7026)).
+- Edit tool prompt now documents whole-line insert selections, steers multi-line edits toward inline selections instead of block rewrites that retype unchanged lines, and warns that a REWRITE gap with nothing captured in MATCH is written to the file literally.
 
 ## [17.4.3] - 2026-08-21
 
