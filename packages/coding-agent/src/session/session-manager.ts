@@ -2247,6 +2247,7 @@ export class SessionManager {
 			fromExtension?: boolean;
 			preserveData?: Record<string, unknown>;
 			method?: CompactionMethod;
+			providerReplayThroughEntryId?: string;
 			tokensAfter?: number;
 		} = {},
 	): string {
@@ -2259,6 +2260,7 @@ export class SessionManager {
 			tokensBefore,
 			tokensAfter: options.tokensAfter,
 			method: options.method,
+			providerReplayThroughEntryId: options.providerReplayThroughEntryId,
 			details: options.details,
 			fromExtension: options.fromExtension,
 			preserveData: options.preserveData,
