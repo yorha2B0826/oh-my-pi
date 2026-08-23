@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [18.0.3] - 2026-08-23
+
+### Fixed
+
+- Fixed a Fireworks-hosted model aborting mid-generation with an HTTP 400 `Floating point NaN (not-a-number) is detected in generation` killing the turn instead of retrying; this model-side numerical fault is now classified transient and retried, matching the existing treatment of Copilot fleet-skew 400s ([#9458](https://github.com/can1357/oh-my-pi/issues/9458)).
+
 ## [18.0.2] - 2026-08-23
 
 ### Fixed

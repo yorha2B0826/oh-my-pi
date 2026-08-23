@@ -275,4 +275,52 @@ describe("ToolExecutionComponent live preview spinners", () => {
 			component.stopAnimation();
 		}
 	});
+	// Regression: a live hub call whose streamed args have not parsed yet
+	// (op still unknown) folded to a contentless `╭─ Hub` / `╰` frame under
+	// viewport pressure. A squeezed block keeps its real render whenever it
+	// fits the allocation; only genuinely overflowing blocks fold.
+	it("keeps the real render on squeezed hub blocks when it fits", () => {
+		const component = new ToolExecutionComponent(
+			"hub",
+			{},
+			{},
+			{ name: "hub", label: "Hub" } as never,
+			{ requestRender: vi.fn(), requestComponentRender: vi.fn() } as unknown as TUI,
+			process.cwd(),
+		);
+		try {
+			component.setTranscriptAllocation(2, { tick: 0, now: 0 });
+			const pending = component.render(80).map(row => stripVTControlCharacters(row));
+			expect(pending).toHaveLength(1);
+			expect(pending[0]).toContain("Hub");
+			expect(pending[0]).not.toContain("╭");
+
+			component.updateResult({ content: [{ type: "text", text: "done" }] }, false);
+			const settled = component.render(80).map(row => stripVTControlCharacters(row));
+			expect(settled.length).toBeLessThanOrEqual(2);
+			expect(settled.join("\n")).toContain("done");
+		} finally {
+			component.stopAnimation();
+		}
+	});
+
+	it("folds an overflowing squeezed hub block to a frame naming its op target", () => {
+		const component = new ToolExecutionComponent(
+			"hub",
+			{ op: "send", to: "Main", message: "hi" },
+			{},
+			{ name: "hub", label: "Hub" } as never,
+			{ requestRender: vi.fn(), requestComponentRender: vi.fn() } as unknown as TUI,
+			process.cwd(),
+		);
+		try {
+			component.updateResult({ content: [{ type: "text", text: "line1\nline2\nline3\nline4" }] }, false);
+			component.setTranscriptAllocation(1, { tick: 0, now: 0 });
+			const folded = component.render(80).map(row => stripVTControlCharacters(row));
+			expect(folded).toHaveLength(1);
+			expect(folded[0]).toContain("Hub · send → Main");
+		} finally {
+			component.stopAnimation();
+		}
+	});
 });

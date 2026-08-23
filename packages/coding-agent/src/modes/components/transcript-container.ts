@@ -44,7 +44,8 @@ function isPlainBlank(line: string): boolean {
 	return !/\S/.test(line);
 }
 
-function trimBlankEdges(rows: readonly string[]): readonly string[] {
+/** Strip leading/trailing all-blank rows; the viewport allocator measures blocks by this trimmed height. */
+export function trimBlankEdges(rows: readonly string[]): readonly string[] {
 	let start = 0;
 	let end = rows.length;
 	while (start < end && isPlainBlank(rows[start]!)) start++;
