@@ -411,9 +411,12 @@ export class ToolExecutionComponent extends Container {
 	// late result can update its streaming preview.
 	#sealed = false;
 	// Tool result snapshots that may be superseded by a later same-tool call
-	// while active. `hub` uses this for repeated all-running polls; `todo` uses
+	// while still in the mutable viewport. `hub` uses this for repeated all-running polls; `todo` uses
 	// it for per-turn state snapshots so only the latest list remains visible.
 	#displaceableByToolName: DisplaceableToolName | undefined;
+	// Execution start on the presentation clock (performance.now domain, the
+	// same domain as AnimationFrame.now supplied by the transcript allocator).
+	#executionStartedAtNow: number | undefined;
 	// Wall clock captured whenever a task card is rebuilt.
 	#taskRenderNowMs = Date.now();
 	// Set on each `render()` when the last painted pending shape must be
@@ -520,6 +523,7 @@ export class ToolExecutionComponent extends Container {
 	setExecutionStarted(_toolCallId?: string): void {
 		if (this.#executionStarted) return;
 		this.#executionStarted = true;
+		this.#executionStartedAtNow = performance.now();
 		this.#argsComplete = true;
 		this.#updateSpinnerAnimation();
 		this.#schedulePreviewDiff();
@@ -857,9 +861,6 @@ export class ToolExecutionComponent extends Container {
 		if (!this.#toolActivityVisible) return true;
 		if (this.#sealed) return true;
 		if (this.#result === undefined) return false;
-		// A displaceable snapshot stays active so a follow-up call can remove it
-		// while {@link TranscriptContainer.canRemoveBlock} permits retraction.
-		if (this.#displaceableByToolName) return false;
 		// A parked background task's call already returned; job frames that land
 		// while it is still live keep updating it, but it must not gate history.
 		if (this.#parkedBackground) return true;
@@ -890,9 +891,10 @@ export class ToolExecutionComponent extends Container {
 
 	/**
 	 * Whether this block is a supersedable result snapshot that has not been
-	 * sealed. Such a block never finalized, so none of its rows entered native
-	 * scrollback and the whole block can be removed when a follow-up matching
-	 * tool call supersedes it.
+	 * sealed. Displacement is best-effort: the snapshot finalizes like any other
+	 * block, so under capacity pressure it may retire to native scrollback
+	 * first — then the follow-up call appends a fresh snapshot instead of
+	 * removing this one (see {@link TranscriptContainer.canRemoveBlock}).
 	 */
 	isDisplaceableBlock(): boolean {
 		return this.#displaceableByToolName !== undefined && !this.#sealed;
@@ -1008,9 +1010,12 @@ export class ToolExecutionComponent extends Container {
 	#renderCompact(width: number): readonly string[] {
 		const summary = this.#activitySummary();
 		const detail = summary.detail ? ` · ${summary.detail.replace(/\s+/g, " ")}` : "";
-		const elapsed = this.#executionStarted
-			? ` ${Math.max(0, Math.floor((this.#presentationFrame.now - this.#taskRenderNowMs) / 1000))}s`
-			: "";
+		// Elapsed ticks only while the call is genuinely running; a settled
+		// placeholder row must not read as live ("Todo · running 0s").
+		const elapsed =
+			this.#isRunning() && this.#executionStartedAtNow !== undefined
+				? ` ${Math.max(0, Math.floor((this.#presentationFrame.now - this.#executionStartedAtNow) / 1000))}s`
+				: "";
 		const text = truncateToWidth(`${summary.label}${detail}${elapsed}`, Math.max(1, width - 4));
 		if (this.#allocation === 1) {
 			const glyph = this.#spinnerFrame === undefined ? "•" : (theme.spinnerFrames[this.#spinnerFrame] ?? "•");
@@ -1020,10 +1025,12 @@ export class ToolExecutionComponent extends Container {
 	}
 
 	#activitySummary(): ToolActivitySummary {
+		this.#renderState.renderContext ??= this.#buildRenderContext();
 		const summary = this.#renderer?.activitySummary?.(this.#args, {
 			expanded: this.#expanded,
 			isPartial: this.#isPartial,
 			spinnerFrame: this.#spinnerFrame,
+			renderContext: this.#renderState.renderContext,
 		});
 		if (summary !== undefined) return summary;
 		if (isRecord(this.#args)) {
@@ -1034,7 +1041,11 @@ export class ToolExecutionComponent extends Container {
 				}
 			}
 		}
-		return { label: this.#toolLabel, detail: "running" };
+		return { label: this.#toolLabel, detail: this.#isRunning() ? "running" : undefined };
+	}
+	/** Still executing: no settled result yet and the turn has not sealed it. */
+	#isRunning(): boolean {
+		return !this.#sealed && (this.#result === undefined || this.#isPartial);
 	}
 
 	// Viewport-/settings-dependent image sizing folded into the memo key only when

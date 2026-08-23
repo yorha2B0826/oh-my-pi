@@ -2,6 +2,7 @@ import {
 	type Component,
 	Container,
 	ProcessTerminal,
+	type ResizeScrollbackMode,
 	Spacer,
 	type Terminal,
 	type TerminalFramePlan,
@@ -23,6 +24,7 @@ export interface ComposerPreferences {
 	readonly composerShape: string;
 	readonly showHardwareCursor: boolean;
 	readonly maxInlineImages: number;
+	readonly resizeScrollback: ResizeScrollbackMode;
 	readonly imeSafeCursor: boolean;
 	readonly autocompleteMaxVisible: number;
 	readonly spellingTypoDetection: boolean;
@@ -36,6 +38,7 @@ export const COMPOSER_DEFAULTS: ComposerPreferences = {
 	composerShape: "box",
 	showHardwareCursor: true,
 	maxInlineImages: 8,
+	resizeScrollback: "rebuild",
 	imeSafeCursor: false,
 	autocompleteMaxVisible: 10,
 	spellingTypoDetection: true,
@@ -146,6 +149,7 @@ export class Composer implements TerminalFrameProvider {
 		);
 		this.ui.setFrameProvider(this);
 		this.ui.setMaxInlineImages(this.#preferences.maxInlineImages);
+		this.ui.setResizeScrollback(this.#preferences.resizeScrollback);
 
 		this.#editor = new CustomEditor(getEditorTheme());
 		this.editor.disableSubmit = true;
@@ -231,7 +235,7 @@ export class Composer implements TerminalFrameProvider {
 		return rendered.length <= rows ? rendered : rendered.slice(rendered.length - rows);
 	}
 
-	/** Re-offer the complete finalized prefix after an explicit display reset. */
+	/** Re-offer the complete finalized prefix after a display reset or resize replay. */
 	resetHistory(): void {
 		this.#offeredHistory = undefined;
 		this.#headerRetired = false;
@@ -323,6 +327,7 @@ export class Composer implements TerminalFrameProvider {
 		this.ui.setShowHardwareCursor(this.#preferences.showHardwareCursor);
 		this.editor.setUseTerminalCursor(this.ui.getShowHardwareCursor());
 		this.ui.setMaxInlineImages(this.#preferences.maxInlineImages);
+		if (update.resizeScrollback !== undefined) this.ui.setResizeScrollback(update.resizeScrollback);
 		this.editor.setImeSafeCursorLayout(this.#preferences.imeSafeCursor);
 		this.editor.setAutocompleteMaxVisible(this.#preferences.autocompleteMaxVisible);
 		this.editor.setSpellingFeatures({

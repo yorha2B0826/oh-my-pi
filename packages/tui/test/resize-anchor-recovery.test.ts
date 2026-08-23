@@ -1,7 +1,7 @@
 import { expect, it } from "bun:test";
 import { KittyTerminal, loadModuleSync } from "kitty-vt-wasm";
 
-const module = loadModuleSync(Bun.resolveSync("kitty-vt-wasm/kitty-vt.wasm", "/work/pi/packages/tui/test"));
+const module = loadModuleSync(Bun.resolveSync("kitty-vt-wasm/kitty-vt.wasm", import.meta.dir));
 
 function makeTerm(columns: number, rows: number) {
 	let output = "";

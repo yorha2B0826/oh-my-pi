@@ -1526,6 +1526,7 @@ export async function runRootCommand(
 			composerShape: settingsInstance.get("composer.shape") ?? "box",
 			showHardwareCursor: settingsInstance.get("showHardwareCursor"),
 			maxInlineImages: settingsInstance.get("tui.maxInlineImages"),
+			resizeScrollback: settingsInstance.get("tui.resizeScrollback"),
 			imeSafeCursor: settingsInstance.get("tui.imeSafeCursor"),
 			autocompleteMaxVisible: settingsInstance.get("autocompleteMaxVisible"),
 			spellingTypoDetection: settingsInstance.get("spelling.typoDetection"),

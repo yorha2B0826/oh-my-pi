@@ -1214,7 +1214,22 @@ function parseOperations(input: string, content: string): Operation[] {
 					return;
 				}
 			} catch {
-				// No block resembles the desired text; keep the fail-closed error.
+				// Fall through to closest-block replacement.
+			}
+			// Stated text is not present verbatim: apply it over the closest
+			// block when exactly one same-line-count window is decisively
+			// similar (an exact block scores 0 and is never adopted here);
+			// otherwise keep the fail-closed error.
+			const closest = closestDesiredBlock(content, sourcePatternText);
+			if (closest !== undefined) {
+				operations.push({
+					patternText: closest,
+					sourcePatternText,
+					rewrite: { kind: "explicit", text: sourcePatternText },
+					all: false,
+					recoveryNote: `Note: operation ${operations.length + 1} stated desired text without markers; the closest matching block was replaced with it. Mark changes explicitly with ${SELECT_OPEN}old${SELECT_DIVIDER}new${SELECT_CLOSE}.`,
+				});
+				return;
 			}
 		}
 		const needsSeparator = `Operation ${operations.length + 1} needs ${REWRITE_HEADER}.\nCopy-ready corrected payload (fill in the new text):\n${[...lines.slice(0, endIndex), REWRITE_HEADER, "<new text>", ...lines.slice(endIndex)].join("\n")}`;
@@ -2068,6 +2083,61 @@ function closestFragment(
 		}
 	}
 	return { text: best.text, offset: best.offset };
+}
+
+/**
+ * Current form of a marker-less desired-text block: the same-line-count
+ * window most similar to the stated text, accepted only when it is close
+ * enough to be that block's current form (Levenshtein over normalized text)
+ * and decisively better than every non-overlapping runner-up. `undefined`
+ * keeps the fail-closed `needs »` error.
+ */
+function closestDesiredBlock(content: string, statedText: string): string | undefined {
+	const statedNormalized = normalizeText(statedText).text;
+	if (statedNormalized.length < 12 || statedNormalized.length > 1000) return undefined;
+	const statedLineCount = statedText.split("\n").length;
+	const lines = content.split("\n");
+	if (lines.length < statedLineCount) return undefined;
+	const scores: number[] = [];
+	let best: { index: number; score: number } | undefined;
+	for (let index = 0; index + statedLineCount <= lines.length; index++) {
+		const windowNormalized = normalizeText(lines.slice(index, index + statedLineCount).join("\n")).text;
+		const maxLength = Math.max(1, statedNormalized.length, windowNormalized.length);
+		if (windowNormalized === statedNormalized) {
+			scores.push(0);
+			best = { index, score: 0 };
+			continue;
+		}
+		// A pure head/tail truncation or extension is an echoed anchor (a
+		// dropped `;`, a clipped line), not a stated edit of that block.
+		const affixEcho =
+			statedNormalized.startsWith(windowNormalized) ||
+			windowNormalized.startsWith(statedNormalized) ||
+			statedNormalized.endsWith(windowNormalized) ||
+			windowNormalized.endsWith(statedNormalized);
+		// A length gap already forces the score past the acceptance bound.
+		if (
+			windowNormalized === "" ||
+			affixEcho ||
+			Math.abs(windowNormalized.length - statedNormalized.length) / maxLength > 0.35
+		) {
+			scores.push(1);
+			continue;
+		}
+		const score = levenshteinDistance(statedNormalized, windowNormalized) / maxLength;
+		scores.push(score);
+		if (best === undefined || score < best.score) best = { index, score };
+	}
+	// score 0 means an exact block `locate` already handles; never adopt it here.
+	if (best === undefined || best.score === 0 || best.score > 0.35) return undefined;
+	for (let index = 0; index < scores.length; index++) {
+		if (Math.abs(index - best.index) < statedLineCount) continue;
+		if (scores[index] - best.score < 0.1) return undefined;
+	}
+	const text = lines.slice(best.index, best.index + statedLineCount).join("\n");
+	const markers = [SELECT_OPEN, SELECT_CLOSE, SELECT_DIVIDER, GAP, ADD_LINE, REWRITE_HEADER, OPENER, SECTION_OPENER];
+	if (markers.some(marker => text.includes(marker))) return undefined;
+	return text;
 }
 
 function numberedPreview(content: string, offset: number): string {

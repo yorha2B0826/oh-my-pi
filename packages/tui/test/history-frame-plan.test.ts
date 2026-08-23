@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { type TerminalFramePlan, type TerminalFrameProvider, TUI, type ViewportSize } from "@oh-my-pi/pi-tui";
+import { VirtualRenderScheduler } from "./virtual-render-scheduler";
 import { VirtualTerminal } from "./virtual-terminal";
 
 class Provider implements TerminalFrameProvider {
@@ -58,6 +59,66 @@ class ResizeScheduler {
 		this.#pending.clear();
 		for (const callback of pending) callback();
 	}
+}
+class WidthReplayProvider implements TerminalFrameProvider {
+	#nextHistoryId = 1;
+	#retired = false;
+	resetCount = 0;
+
+	renderFrame(viewport: ViewportSize): TerminalFramePlan {
+		const width = viewport.columns;
+		return {
+			history: this.#retired
+				? undefined
+				: { id: this.#nextHistoryId, rows: [`history-one@${width}`, `history-two@${width}`] },
+			viewport: [`editor@${width}`],
+		};
+	}
+
+	acknowledgeHistory(id: number): void {
+		if (id !== this.#nextHistoryId) return;
+		this.#nextHistoryId++;
+		this.#retired = true;
+	}
+
+	resetHistory(): void {
+		this.#retired = false;
+		this.resetCount++;
+	}
+}
+
+class HeightReplayProvider implements TerminalFrameProvider {
+	#nextHistoryId = 1;
+	#retired = false;
+	resetCount = 0;
+
+	renderFrame(viewport: ViewportSize): TerminalFramePlan {
+		return {
+			history: this.#retired
+				? undefined
+				: { id: this.#nextHistoryId, rows: ["real-todo-block", "real-read-block", "real-bash-block"] },
+			viewport: ["dot-live-one", "dot-live-two", "editor"].slice(-viewport.rows),
+		};
+	}
+
+	renderResizeFrame(): readonly string[] {
+		return ["resize frame"];
+	}
+
+	acknowledgeHistory(id: number): void {
+		if (id !== this.#nextHistoryId) return;
+		this.#nextHistoryId++;
+		this.#retired = true;
+	}
+
+	resetHistory(): void {
+		this.#retired = false;
+		this.resetCount++;
+	}
+}
+
+function plainBuffer(terminal: VirtualTerminal): string[] {
+	return terminal.getScrollBuffer().map(row => Bun.stripANSI(row).trimEnd());
 }
 
 describe("terminal frame plans", () => {
@@ -126,12 +187,87 @@ describe("terminal frame plans", () => {
 		).toEqual(["welcome", "editor"]);
 
 		renderScheduler.settle();
+		renderScheduler.settle();
 		expect(
 			terminal
 				.getViewport()
 				.map(row => row.trimEnd())
 				.slice(0, 2),
 		).toEqual(["welcome", "editor"]);
+		tui.stop();
+	});
+	it("keeps live viewport rows out of scrollback during a height shrink", () => {
+		// Committed history above a pressured live tail (compact placeholder
+		// rows). The terminal can push a placeholder before the resize callback runs,
+		// so rebuild the semantic history after every geometry change: only real
+		// finalized blocks become permanent scrollback bytes.
+		const terminal = new VirtualTerminal(20, 6);
+		const provider = new HeightReplayProvider();
+		const renderScheduler = new ResizeScheduler();
+		const tui = new TUI(terminal, undefined, { renderScheduler });
+		tui.setFrameProvider(provider);
+		tui.setResizeScrollback("rebuild");
+		tui.start();
+		expect(terminal.getViewport().map(row => row.trimEnd())).toEqual([
+			"real-todo-block",
+			"real-read-block",
+			"real-bash-block",
+			"dot-live-one",
+			"dot-live-two",
+			"editor",
+		]);
+
+		terminal.resize(20, 2); // a single large shrink can push live rows before the callback runs
+		renderScheduler.settle(); // restore the normal buffer, start the anchor probe
+		renderScheduler.settle(); // probe timeout → settled repaint
+
+		const scrollback = plainBuffer(terminal).slice(0, terminal.getBufferPosition().baseY);
+		expect(scrollback.some(row => row.includes("dot-live"))).toBe(false);
+		expect(scrollback).toEqual(["real-todo-block", "real-read-block", "real-bash-block"]);
+		expect(provider.resetCount).toBe(1);
+		tui.stop();
+	});
+
+	it("appends a current-width replay after settled resize", async () => {
+		const terminal = new VirtualTerminal(20, 2);
+		const provider = new WidthReplayProvider();
+		const renderScheduler = new VirtualRenderScheduler();
+		const tui = new TUI(terminal, undefined, { renderScheduler });
+		tui.setResizeScrollback("append");
+		tui.setFrameProvider(provider);
+		tui.start();
+		await renderScheduler.settle(terminal);
+
+		expect(plainBuffer(terminal)).toContain("history-one@20");
+
+		terminal.resize(30, 2);
+		await renderScheduler.advance(terminal, 160);
+
+		const resized = plainBuffer(terminal);
+		expect(provider.resetCount).toBe(1);
+		expect(resized).toContain("history-one@20");
+		expect(resized).toContain("history-one@30");
+		expect(resized.slice(-2)).toEqual(["history-two@30", "editor@30"]);
+		tui.stop();
+	});
+
+	it("rebuilds current-width history without retaining stale rows", async () => {
+		const terminal = new VirtualTerminal(20, 2);
+		const provider = new WidthReplayProvider();
+		const renderScheduler = new VirtualRenderScheduler();
+		const tui = new TUI(terminal, undefined, { renderScheduler });
+		tui.setResizeScrollback("rebuild");
+		tui.setFrameProvider(provider);
+		tui.start();
+		await renderScheduler.settle(terminal);
+
+		terminal.resize(30, 2);
+		await renderScheduler.advance(terminal, 160);
+
+		const resized = plainBuffer(terminal);
+		expect(provider.resetCount).toBe(1);
+		expect(resized.some(row => row.includes("@20"))).toBe(false);
+		expect(resized).toEqual(["history-one@30", "history-two@30", "editor@30"]);
 		tui.stop();
 	});
 });

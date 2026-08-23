@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.0.1] - 2026-08-23
+
 ### Changed
 
 - Broker-backed startup no longer blocks on a broker round trip when the encrypted snapshot cache is fresh: the credential store starts from the cached snapshot and the background snapshot stream revalidates immediately (stale-while-revalidate). First launches and expired caches still fail fast with the actionable broker error.
@@ -23,6 +25,11 @@
 - Fixed Cursor sessions aborting on the next turn or during compaction after MCP tools returned numeric-looking string arguments ([#9394](https://github.com/can1357/oh-my-pi/issues/9394)).
 - Fixed glyph tokenization crashing with `entries is not a function` when `Context.systemPrompt` arrived as a bare string (e.g. from legacy earendil-works extensions); it is now normalized to an array before iterating, matching every provider path ([#9384](https://github.com/can1357/oh-my-pi/issues/9384)).
 
+### Added
+
+- Added Amazon Bedrock Converse guardrail configuration with provider-scoped identifier, version, and trace settings.
+
+### Changed
 ## [18.0.0] - 2026-08-22
 
 ### Added

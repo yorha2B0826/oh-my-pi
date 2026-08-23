@@ -107,6 +107,39 @@ describe("TranscriptContainer", () => {
 		expect(transcript.canAdmit(2)).toBe(false);
 		expect(transcript.renderViewport(80, 1, frame)).toEqual(["1 more transcript blocks active"]);
 	});
+	it("does not report settled resume backlog as active", () => {
+		const transcript = new TranscriptContainer();
+		transcript.addChild(new Block(["settled one"], true));
+		transcript.addChild(new Block(["settled two"], true));
+		transcript.addChild(new Block(["current tool"], false));
+
+		// The welcome header can consume the first history offer, leaving the
+		// settled transcript prefix live for one frame while it drains next.
+		expect(transcript.renderViewport(80, 1, frame)).toEqual(["current tool"]);
+	});
+
+	it("permits removing settled blocks until they are offered or committed", () => {
+		const transcript = new TranscriptContainer();
+		const settled = new Block(["settled snapshot"], true);
+		const live = new Block(["live", "live", "live"], false);
+		transcript.addChild(settled);
+		transcript.addChild(live);
+
+		// Settled but still in the mutable viewport: removable without a trace,
+		// so a follow-up displaceable snapshot can retract it.
+		expect(transcript.canRemoveBlock(settled)).toBe(true);
+
+		// Offered to the terminal: mid-write, no longer removable.
+		const batch = transcript.peekFinalizedBatch(80, 2);
+		expect(batch?.rows).toEqual(["settled snapshot", ""]);
+		expect(transcript.canRemoveBlock(settled)).toBe(false);
+
+		// Committed: immutable history; removal must be refused outright.
+		transcript.acknowledgeFinalizedBatch(batch!.id);
+		expect(transcript.canRemoveBlock(settled)).toBe(false);
+		transcript.removeChild(settled);
+		expect(transcript.blockStates()).toEqual(["committed", "active"]);
+	});
 
 	it("reoffers committed history after an explicit destructive reset", () => {
 		const transcript = new TranscriptContainer();

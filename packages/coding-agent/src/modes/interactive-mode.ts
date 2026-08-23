@@ -129,6 +129,7 @@ import { setAutoQaConsentHandler } from "../tools/report-tool-issue";
 import {
 	formatPhaseDisplayName,
 	isClosedTodo,
+	nextActionableTask,
 	selectCollapsedTodos,
 	setActiveTodoDescriptionsProvider,
 	todoMatchesAnyDescription,
@@ -429,8 +430,37 @@ export interface InteractiveModeOptions {
 	initialMessages?: string[];
 }
 
+export const TODO_COMPACT_TERMINAL_ROWS_THRESHOLD = 18;
+
 /** Holds mutable HUD and editor-adjacent chrome outside transcript history. */
 class AnchoredLiveContainer extends Container {}
+
+class TodoHudContainer extends AnchoredLiveContainer {
+	constructor(private readonly mode: InteractiveMode) {
+		super();
+	}
+
+	override render(width: number): readonly string[] {
+		if (this.mode.isCompactTodoMode()) {
+			return [];
+		}
+		return super.render(width);
+	}
+}
+
+class StatusHudContainer extends AnchoredLiveContainer {
+	constructor(private readonly mode: InteractiveMode) {
+		super();
+	}
+
+	override render(width: number): readonly string[] {
+		const childLines = super.render(width);
+		if (!this.mode.isCompactTodoMode()) {
+			return childLines;
+		}
+		return this.mode.renderCompactStatusLine(width, childLines);
+	}
+}
 
 /**
  * Preview of the command panels queued while the agent streams, rendered above
@@ -813,6 +843,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			composerShape: settings.get("composer.shape") ?? "box",
 			showHardwareCursor: settings.get("showHardwareCursor"),
 			maxInlineImages: settings.get("tui.maxInlineImages"),
+			resizeScrollback: settings.get("tui.resizeScrollback"),
 			imeSafeCursor: settings.get("tui.imeSafeCursor"),
 			autocompleteMaxVisible: settings.get("autocompleteMaxVisible"),
 			spellingTypoDetection: settings.get("spelling.typoDetection"),
@@ -883,8 +914,8 @@ export class InteractiveMode implements InteractiveModeContext {
 		setTerminalTextSizing(settings.get("tui.textSizing") && TERMINAL.supportsTextSizing);
 		this.chatContainer = new TranscriptContainer();
 		this.pendingMessagesContainer = new AnchoredLiveContainer();
-		this.statusContainer = new AnchoredLiveContainer();
-		this.todoContainer = new AnchoredLiveContainer();
+		this.statusContainer = new StatusHudContainer(this);
+		this.todoContainer = new TodoHudContainer(this);
 		this.subagentContainer = new AnchoredLiveContainer();
 		this.btwContainer = new AnchoredLiveContainer();
 		this.omfgContainer = new AnchoredLiveContainer();
@@ -2519,6 +2550,73 @@ export class InteractiveMode implements InteractiveModeContext {
 		lines.push(` ${theme.fg("accent", tail.slice(0, tailFilled))}${theme.fg("dim", tail.slice(tailFilled))}`);
 		this.todoContainer.addChild(new Text(lines.join("\n"), 1, 0));
 	}
+
+	isCompactTodoMode(): boolean {
+		const rows = this.ui?.terminal?.rows ?? process.stdout.rows ?? 24;
+		return rows < TODO_COMPACT_TERMINAL_ROWS_THRESHOLD;
+	}
+
+	renderCompactStatusLine(width: number, childLines: readonly string[]): readonly string[] {
+		const phases = this.todoPhases.filter(phase => phase.tasks.length > 0);
+		if (phases.length === 0) return childLines;
+
+		const activeDescs = this.#getActiveSubagentDescriptions();
+		const isMatched = (todo: TodoItem): boolean =>
+			activeDescs.length > 0 && todoMatchesAnyDescription(todo.content, activeDescs);
+
+		const totalTasks = phases.reduce((sum, phase) => sum + phase.tasks.length, 0);
+		const closedTasks = phases.reduce((sum, phase) => sum + phase.tasks.filter(isClosedTodo).length, 0);
+		const activeTask = nextActionableTask(phases);
+
+		const header = `${theme.bold(theme.fg("accent", "TODO"))} ${theme.fg("dim", `${closedTasks}/${totalTasks}`)}`;
+		const taskStr = activeTask
+			? this.#formatTodoLine(activeTask, "", isMatched(activeTask))
+			: theme.fg("success", `${theme.checkbox.checked} done`);
+		const rightLine = `${header} ${theme.fg("dim", "·")} ${taskStr}`;
+
+		const rightPad = " ";
+		const rightWidth = visibleWidth(rightLine) + 1;
+
+		let leftLine = "";
+		if (childLines.length > 0) {
+			leftLine = childLines[childLines.length - 1] ?? "";
+		}
+
+		const leftWidth = visibleWidth(leftLine);
+		const minGap = 2;
+
+		let combinedLine: string;
+		if (leftWidth === 0) {
+			if (rightWidth <= width) {
+				const gap = Math.max(0, width - rightWidth);
+				combinedLine = " ".repeat(gap) + rightLine + rightPad;
+			} else {
+				const maxRight = Math.max(4, width - 1);
+				const truncatedRight = truncateToWidth(rightLine, maxRight);
+				const gap = Math.max(0, width - visibleWidth(truncatedRight) - 1);
+				combinedLine = " ".repeat(gap) + truncatedRight + rightPad;
+			}
+		} else {
+			if (leftWidth + minGap + rightWidth <= width) {
+				const gap = width - leftWidth - rightWidth;
+				combinedLine = leftLine + " ".repeat(gap) + rightLine + rightPad;
+			} else {
+				const maxRight = Math.min(rightWidth, Math.max(10, Math.floor(width * 0.45)));
+				const truncatedRight = truncateToWidth(rightLine, maxRight);
+				const truncatedRightWidth = visibleWidth(truncatedRight) + 1;
+				const availableLeft = Math.max(4, width - truncatedRightWidth - minGap);
+				const truncatedLeft = truncateToWidth(leftLine, availableLeft);
+				const gap = Math.max(minGap, width - visibleWidth(truncatedLeft) - truncatedRightWidth);
+				combinedLine = truncatedLeft + " ".repeat(gap) + truncatedRight + rightPad;
+			}
+		}
+
+		const leadingLines = childLines.length > 1 ? childLines.slice(0, -1) : [""];
+		return [...leadingLines, combinedLine];
+	}
+
+	/**
+	 * Anchored HUD of in-flight subagents, mirroring the Todos block above the
 
 	/**
 	 * Anchored HUD of in-flight subagents, mirroring the Todos block above the

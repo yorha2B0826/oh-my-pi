@@ -3,6 +3,7 @@ import { TranscriptContainer } from "@oh-my-pi/pi-coding-agent/modes/components/
 import { COMPOSER_DEFAULTS, Composer } from "@oh-my-pi/pi-coding-agent/modes/composer";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { Component, RenderScheduler } from "@oh-my-pi/pi-tui";
+import { VirtualRenderScheduler } from "../../tui/test/virtual-render-scheduler";
 import { VirtualTerminal } from "../../tui/test/virtual-terminal";
 
 class ResizeScheduler implements RenderScheduler {
@@ -43,6 +44,13 @@ class MutableComposerTail implements Component {
 		return ["╭─ EDITOR TOP ─╮", `│ ${this.status} │`, "╰─ EDITOR BOTTOM ─╯"];
 	}
 }
+class WidthTranscriptBlock implements Component {
+	constructor(readonly id: number) {}
+
+	render(width: number): readonly string[] {
+		return [`block-${this.id}@${width}`];
+	}
+}
 
 class TrackingTerminal extends VirtualTerminal {
 	readonly writes: string[] = [];
@@ -80,13 +88,13 @@ beforeAll(async () => {
 });
 
 describe("composer welcome native-history resize", () => {
-	it("keeps one exact editor rectangle and retired welcome through repeated thinking and resize frames", () => {
+	it("keeps one exact editor rectangle and retired welcome through repeated thinking and resize frames", async () => {
 		const terminal = new TrackingTerminal(80, 12);
 		const scheduler = new ResizeScheduler();
 		const composer = new Composer({
 			terminal,
 			tuiOptions: { renderScheduler: scheduler },
-			preferences: { ...COMPOSER_DEFAULTS, quiet: false },
+			preferences: { ...COMPOSER_DEFAULTS, quiet: false, resizeScrollback: "preserve" },
 			welcome: { version: "test", modelName: "test-model", providerName: "test-provider" },
 		});
 		const offered: number[] = [];
@@ -147,6 +155,9 @@ describe("composer welcome native-history resize", () => {
 		}
 		expect(resizeFrames).toBe(3);
 		scheduler.settle();
+		// The settled anchor repaint waits on the CPR reply, which VirtualTerminal
+		// delivers on a microtask — drain it before reading the normal screen.
+		await terminal.flush();
 
 		let settledViewport = terminal.getViewport().map(row => Bun.stripANSI(row));
 		expect(countRows(settledViewport, "Welcome back!")).toBe(1);
@@ -166,6 +177,7 @@ describe("composer welcome native-history resize", () => {
 		}
 		expect(resizeFrames).toBe(5);
 		scheduler.settle();
+		await terminal.flush();
 
 		settledViewport = terminal.getViewport().map(row => Bun.stripANSI(row));
 		expect(countRows(settledViewport, "Welcome back!")).toBe(1);
@@ -176,6 +188,31 @@ describe("composer welcome native-history resize", () => {
 		expect(offered).toHaveLength(1);
 		expect(acknowledged).toHaveLength(1);
 		expect(terminal.writes.slice(writesAfterRetirement).some(write => write.includes("\x1b[3J"))).toBe(false);
+		composer.ui.stop();
+	});
+	it("rebuilds retired transcript rows at the settled width by default", async () => {
+		const terminal = new VirtualTerminal(20, 4);
+		const scheduler = new VirtualRenderScheduler();
+		const composer = new Composer({
+			terminal,
+			tuiOptions: { renderScheduler: scheduler },
+			preferences: { ...COMPOSER_DEFAULTS, quiet: true },
+		});
+		const transcript = new TranscriptContainer();
+		for (let id = 0; id < 4; id++) transcript.addChild(new WidthTranscriptBlock(id));
+		composer.setRuntimeChildren([transcript, new MutableComposerTail()]);
+		composer.start({ playWelcomeIntro: false });
+		await scheduler.settle(terminal);
+
+		expect(plainBuffer(terminal)).toContain("block-0@20");
+
+		terminal.resize(30, 4);
+		await scheduler.advance(terminal, 160);
+
+		const resized = plainBuffer(terminal);
+		expect(resized.some(row => row.includes("@20"))).toBe(false);
+		expect(resized).toContain("block-0@30");
+		expect(resized).toContain("block-3@30");
 		composer.ui.stop();
 	});
 });

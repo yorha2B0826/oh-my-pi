@@ -100,8 +100,10 @@ describe("sloppy v8", () => {
 
 	test("keeps a mid-line ellipsis in REWRITE literal when the capture is multi-line", () => {
 		const content = "function f() {\n  a();\n  b();\n}\n";
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: test fixture contains template literal
 		const input = operation("function f() {\n…\n}", "function f() {\n  return `${x}[… ]${y}`;\n}");
 
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: test fixture contains template literal
 		expect(variant.apply(content, input, context)).toBe("function f() {\n  return `${x}[… ]${y}`;\n}\n");
 	});
 
@@ -412,12 +414,47 @@ describe("sloppy v8", () => {
 		);
 	});
 
-	test("rejects marker-less desired text instead of inferring indentation", () => {
+	test("applies marker-less desired text over its closest near-match block", () => {
 		const content = "    if (!entryRow)\n      throw invalid();\n";
+		const notes: string[] = [];
 
-		expect(() =>
-			applySloppy(content, "§\n    if (entryRow)\n      throw invalid();", { path: "i.ts", notes: [] }),
-		).toThrow(/needs »/);
+		expect(applySloppy(content, "§\n    if (entryRow)\n      throw invalid();", { path: "i.ts", notes })).toBe(
+			"    if (entryRow)\n      throw invalid();\n",
+		);
+		expect(notes.join("\n")).toMatch(/closest matching block was replaced/);
+	});
+
+	test("applies a marker-less desired import line over its near-match", () => {
+		// Regression: a stated desired line (one token added) bounced with a
+		// fill-in "needs »" payload instead of replacing the existing line.
+		const content = [
+			'import { parseMCPToolName } from "../mcp";',
+			'import type { ToolRenderer } from "./renderers";',
+			"",
+			"run();",
+			"",
+		].join("\n");
+		const notes: string[] = [];
+		const input = '§\nimport type { ToolActivitySummary, ToolRenderer } from "./renderers";';
+
+		expect(applySloppy(content, input, { path: "xdev.ts", notes })).toBe(
+			[
+				'import { parseMCPToolName } from "../mcp";',
+				'import type { ToolActivitySummary, ToolRenderer } from "./renderers";',
+				"",
+				"run();",
+				"",
+			].join("\n"),
+		);
+		expect(notes.join("\n")).toMatch(/closest matching block was replaced/);
+	});
+
+	test("keeps the fail-closed error when no block resembles the stated text", () => {
+		const content = "const a = 1;\nkeep();\n";
+
+		expect(() => applySloppy(content, "§\nawait fetchRemoteConfig(session);", { path: "i.ts", notes: [] })).toThrow(
+			/needs »/,
+		);
 	});
 
 	test("collapses a duplicated block stated once as mono desired text", () => {
@@ -1975,11 +2012,15 @@ describe("sloppy v8", () => {
 		expect(() => variant.apply(content, input, context)).toThrow(new RegExp(`needs ${esc(M.put)}`));
 	});
 
-	test("keeps an omitted separator error when the prefix match is ambiguous", () => {
+	test("applies an omitted-separator block over its unique same-shape window", () => {
 		const content = "const value = oldValue;\nconst value = oldValue;\n";
 		const input = `${M.open}\nconst value = oldValue;\nconst value = newValue;`;
+		const notes: string[] = [];
 
-		expect(() => variant.apply(content, input, context)).toThrow(new RegExp(`needs ${esc(M.put)}`));
+		expect(variant.apply(content, input, { path: context.path, notes })).toBe(
+			"const value = oldValue;\nconst value = newValue;\n",
+		);
+		expect(notes.join("\n")).toMatch(/closest matching block was replaced/);
 	});
 
 	test("treats empty double selection markers as an insertion point", () => {

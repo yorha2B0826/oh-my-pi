@@ -75,10 +75,18 @@ state because the user action establishes a new display boundary. Ordinary
 renders never clear history.
 
 A resize invalidates viewport geometry and repaints the viewport at the new
-width and height. It does not rebuild, replay, append, or reinterpret existing
-history. The terminal or multiplexer owns reflow of retained history; the
-renderer neither compares physical row counts across widths nor infers a new
-commit boundary from them.
+width and height. After a settled resize, `ResizeScrollbackMode` selects
+how retained history is handled (including cleanup of live rows a height
+shrink may have pushed before the resize callback ran):
+
+- `rebuild` clears native history and replays one current-width transcript;
+- `append` retains native history and appends a current-width transcript copy;
+- `preserve` repaints only the viewport and leaves old-width history unchanged.
+
+The raw TUI defaults to `preserve` and accepts
+`PI_TUI_RESIZE_SCROLLBACK`; the coding agent defaults to `rebuild`. Replays
+reset provider retirement and consume fresh monotonic history batches. They do
+not compare physical row counts across widths or infer a commit boundary.
 
 The renderer never probes the user's scroll position. This keeps updates safe
 while the user is reading older terminal history and avoids terminal- or
@@ -133,10 +141,10 @@ image environment settings.
    id; it never derives history from viewport row position.
 3. Ordinary frames diff and repaint the viewport only. They never rewrite,
    audit, clear, or replay retained history.
-4. Resize repaints the viewport only. Cross-width physical row arithmetic must
-   not affect history.
-5. Only explicit user gestures such as `resetDisplay()` and session replacement
-   may destructively reset the display.
+4. Settled resizes follow the configured replay mode without deriving
+   history from cross-width physical row arithmetic.
+5. Only explicit display resets and `rebuild` resize mode destructively clear
+   native history.
 6. Overlays and image-budget changes remain viewport-local.
 7. Width handling uses the shared ANSI-aware helpers and clamps rather than
    throwing in the render hot path.

@@ -142,6 +142,7 @@ function readUiState(file: string): { preferences: ComposerPreferences; theme: C
 	const composerShape = field(rawPreferences, "composerShape");
 	const showHardwareCursor = field(rawPreferences, "showHardwareCursor");
 	const maxInlineImages = field(rawPreferences, "maxInlineImages");
+	const resizeScrollback = field(rawPreferences, "resizeScrollback");
 	const imeSafeCursor = field(rawPreferences, "imeSafeCursor");
 	const autocompleteMaxVisible = field(rawPreferences, "autocompleteMaxVisible");
 	const spellingTypoDetection = field(rawPreferences, "spellingTypoDetection");
@@ -152,6 +153,10 @@ function readUiState(file: string): { preferences: ComposerPreferences; theme: C
 		typeof composerShape !== "string" ||
 		typeof showHardwareCursor !== "boolean" ||
 		typeof maxInlineImages !== "number" ||
+		(resizeScrollback !== undefined &&
+			resizeScrollback !== "append" &&
+			resizeScrollback !== "rebuild" &&
+			resizeScrollback !== "preserve") ||
 		typeof imeSafeCursor !== "boolean" ||
 		typeof autocompleteMaxVisible !== "number" ||
 		typeof spellingTypoDetection !== "boolean" ||
@@ -181,6 +186,10 @@ function readUiState(file: string): { preferences: ComposerPreferences; theme: C
 			composerShape,
 			showHardwareCursor,
 			maxInlineImages,
+			resizeScrollback:
+				resizeScrollback === "append" || resizeScrollback === "rebuild" || resizeScrollback === "preserve"
+					? resizeScrollback
+					: "rebuild",
 			imeSafeCursor,
 			autocompleteMaxVisible,
 			spellingTypoDetection,

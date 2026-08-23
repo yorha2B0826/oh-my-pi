@@ -229,6 +229,34 @@ describe("ToolExecutionComponent live preview spinners", () => {
 		}
 	});
 
+	it("shows elapsed time only while a compact fallback is running", () => {
+		vi.spyOn(performance, "now").mockReturnValue(1_000);
+		const component = new ToolExecutionComponent(
+			"ext_tool",
+			{},
+			{},
+			{ name: "ext_tool", label: "Catalog" } as never,
+			{ requestRender: vi.fn(), requestComponentRender: vi.fn() } as unknown as TUI,
+			process.cwd(),
+		);
+		try {
+			component.setExecutionStarted();
+			component.setTranscriptAllocation(1, { tick: 27, now: 3_200 });
+			const running = stripVTControlCharacters(component.render(24)[0] ?? "");
+			expect(running).toContain("Catalog · running 2s");
+			expect(Bun.stringWidth(running)).toBeLessThanOrEqual(24);
+
+			component.updateResult({ content: [{ type: "text", text: "done" }] }, false);
+			const settled = stripVTControlCharacters(component.render(24)[0] ?? "");
+			expect(settled).toContain("Catalog");
+			expect(settled).not.toContain("running");
+			expect(settled).not.toMatch(/\d+s$/);
+			expect(Bun.stringWidth(settled)).toBeLessThanOrEqual(24);
+		} finally {
+			component.stopAnimation();
+		}
+	});
+
 	it("gives extension tools a readable compact fallback", () => {
 		const component = new ToolExecutionComponent(
 			"ext_tool",

@@ -69,8 +69,7 @@ export class TranscriptContainer extends Container {
 
 	override removeChild(component: Component): void {
 		if (this.children.indexOf(component) < 0) return;
-		const entry = this.#entry(component);
-		if (entry?.state === "committed") return;
+		if (!this.canRemoveBlock(component)) return;
 		super.removeChild(component);
 		this.#entries = this.#entries.filter(candidate => candidate.component !== component);
 		this.#frontier = Math.min(this.#frontier, this.#entries.length);
@@ -94,7 +93,20 @@ export class TranscriptContainer extends Container {
 
 	/** Whether a transient block may be discarded without leaving tape history. */
 	canRemoveBlock(component: Component): boolean {
-		return this.#entry(component)?.state === "active";
+		// Active and settled blocks only live in the mutable viewport, so removing
+		// them leaves no trace. Committed blocks are immutable terminal history,
+		// and blocks inside the offered-but-unacknowledged batch are mid-write —
+		// removing one would desync the offer's entry range.
+		this.#syncEntries();
+		const index = this.#entries.findIndex(entry => entry.component === component);
+		if (index < 0) return false;
+		if (this.#entries[index]!.state === "committed") return false;
+		return this.#offered === undefined || index >= this.#offered.end;
+	}
+	/** Lifecycle state per block in transcript order (diagnostics and tests). */
+	blockStates(): readonly BlockState[] {
+		this.#syncEntries();
+		return this.#entries.map(entry => entry.state);
 	}
 
 	/** Whether visible active capacity and live-block memory permit another admission. */
@@ -103,7 +115,7 @@ export class TranscriptContainer extends Container {
 		return Math.max(0, Math.trunc(rows)) > active && this.#liveCount() < MAX_LIVE_BLOCKS;
 	}
 
-	/** Rebuild retirement state after an explicit destructive terminal reset. */
+	/** Rebuild retirement state before replaying the complete transcript history. */
 	resetRetirement(): void {
 		this.#frontier = 0;
 		this.#offered = undefined;
@@ -255,10 +267,15 @@ export class TranscriptContainer extends Container {
 		frame: AnimationFrame,
 	): readonly string[] {
 		const output: string[] = [];
-		const visible = live.slice(-rows);
-		const hidden = live.length - visible.length;
-		if (hidden > 0) output.push(`${hidden} more transcript blocks active`);
-		for (const entry of visible.slice(-(rows - output.length))) {
+		const hiddenCount = Math.max(0, live.length - rows);
+		let hiddenActive = 0;
+		for (let index = 0; index < hiddenCount; index++) {
+			if (live[index]!.state === "active") hiddenActive++;
+		}
+		if (hiddenActive > 0) output.push(`${hiddenActive} more transcript blocks active`);
+		const visibleRows = rows - output.length;
+		const visible = visibleRows > 0 ? live.slice(-visibleRows) : [];
+		for (const entry of visible) {
 			this.#setAllocation(entry.component, 1, frame);
 			output.push(entry.component.render(width)[0] ?? "");
 		}
@@ -290,10 +307,6 @@ export class TranscriptContainer extends Container {
 
 	#liveCount(): number {
 		return this.#entries.length - this.#frontier;
-	}
-
-	#entry(component: Component): TranscriptEntry | undefined {
-		return this.#entries.find(entry => entry.component === component);
 	}
 
 	#syncEntries(): void {

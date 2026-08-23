@@ -1137,6 +1137,34 @@ export const SETTINGS_SCHEMA = {
 		description:
 			"Maximum number of inline images kept as live terminal graphics (default 8). Older images fall back to a text placeholder via a full redraw once the limit is exceeded. Set to 0 to keep every image (no limit).",
 	},
+	"tui.resizeScrollback": {
+		type: "enum",
+		values: ["append", "rebuild", "preserve"] as const,
+		default: "rebuild",
+		ui: {
+			tab: "appearance",
+			group: "Display",
+			label: "Resize Scrollback",
+			description: "How a settled terminal resize refreshes transcript rows retained in terminal scrollback",
+			options: [
+				{
+					value: "append",
+					label: "Append",
+					description: "Replay the transcript at the new width below retained history",
+				},
+				{
+					value: "rebuild",
+					label: "Rebuild",
+					description: "Erase all terminal scrollback, then replay one current-width transcript",
+				},
+				{
+					value: "preserve",
+					label: "Preserve",
+					description: "Repaint only the viewport and keep history wrapped at its old width",
+				},
+			],
+		},
+	},
 
 	"terminal.showProgress": {
 		type: "boolean",
@@ -3749,7 +3777,7 @@ export const SETTINGS_SCHEMA = {
 
 	"bash.autoBackground.enabled": {
 		type: "boolean",
-		default: false,
+		default: true,
 		ui: {
 			tab: "shell",
 			group: "Bash",

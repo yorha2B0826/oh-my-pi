@@ -53,6 +53,8 @@ export interface ToolActivityContext {
 	readonly expanded: boolean;
 	readonly isPartial: boolean;
 	readonly spinnerFrame?: number;
+	/** Tool-specific render context (same shape `renderCall` receives), when available. */
+	readonly renderContext?: Record<string, unknown>;
 }
 
 export type ToolRenderer = {

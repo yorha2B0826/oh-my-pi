@@ -80,17 +80,19 @@ The writer:
 5. Restores autowrap, synchronized-output state, and cursor state.
 6. Acknowledges the exact history id only after the write is accepted in-process.
 
-Viewport-only frames cannot create history. Existing native history remains terminal-owned on resize and theme changes.
+Viewport-only frames cannot create history. Theme changes leave native history terminal-owned; settled resizes may replay it according to `ResizeScrollbackMode`.
 
 ## Resize
 
-During resize, TUI borrows the alternate buffer. The frame provider supplies a full semantic viewport tail for that transient buffer; history offers are never acknowledged there. After a short quiet window TUI restores the normal buffer — which the terminal has reflowed — and recovers the viewport anchor with a DSR (CSI 6n) round trip: every normal paint parks the hardware cursor at a known viewport offset, terminals keep that cursor attached to its logical line through width rewrap, and the settled anchor is `min(reported − parkOffset, height − staleReflowedRows)`. The second bound reconstructs height-shrink scrollback pushes that clamp the cursor instead of scrolling it (bottom-preserving resize guarantees the stale viewport ends on the last screen row whenever a push happened); multiplexers clip instead of rewrapping, so the stale-row measure counts one row per row there. The repaint waits for the CPR reply (200 ms timeout falls back to the bounded retained anchor). The normal-buffer history is neither replayed nor rewritten; `packages/tui/test/resize-anchor-recovery.test.ts` validates the formula against kitty's real core.
+During resize, TUI borrows the alternate buffer. The frame provider supplies a full semantic viewport tail for that transient buffer; history offers are never acknowledged there. After a short quiet window TUI restores the normal buffer — which the terminal has reflowed — and recovers the viewport anchor with a DSR (CSI 6n) round trip: every normal paint parks the hardware cursor at a known viewport offset, terminals keep that cursor attached to its logical line through width rewrap, and the settled anchor is `min(reported − parkOffset, height − staleReflowedRows)`. The second bound reconstructs height-shrink scrollback pushes that clamp the cursor instead of scrolling it (bottom-preserving resize guarantees the stale viewport ends on the last screen row whenever a push happened); multiplexers clip instead of rewrapping, so the stale-row measure counts one row per row there. The repaint waits for the CPR reply (200 ms timeout falls back to the bounded retained anchor); `packages/tui/test/resize-anchor-recovery.test.ts` validates the formula against kitty's real core.
+
+A settled resize then applies `ResizeScrollbackMode`. `rebuild` clears native history with ED3 and asks the provider to re-offer the complete finalized transcript under fresh monotonic ids. `append` performs the same replay below retained history. `preserve` skips replay and only repaints the anchored viewport. The raw TUI default is `preserve`; the coding agent sets `rebuild`.
 
 A shrink can make the terminal itself push live viewport rows into scrollback before the app hears about the resize; those rows are unreachable to an inline app and may remain above the repainted frame at their old width. The screen itself always converges to exactly one copy. Likewise, when a history append overflows the screen, the writer first erases the old live viewport region so a scroll can only push committed rows and blanks into scrollback, never an unfinished frame.
 
 ## Explicit display reset
 
-`resetDisplay()` is destructive and user-driven. It is reserved for session replacement, tree/resume replacement, Ctrl+L, and settings that rebuild the semantic transcript. Before ED3, the provider resets retirement state so the complete finalized prefix is reoffered under new monotonic history ids. Ordinary rendering, animation, resize, and tool finalization cannot reach this path.
+`resetDisplay()` is destructive and user-driven. It is reserved for session replacement, tree/resume replacement, Ctrl+L, and settings that rebuild the semantic transcript. Before ED3, the provider resets retirement state so the complete finalized prefix is reoffered under new monotonic history ids. The same reset-and-reoffer transaction serves settled resizes in `rebuild` mode; ordinary rendering, animation, and tool finalization cannot reach it.
 
 Theme or visibility changes that affect only current/future output repaint the mutable viewport; already-retired history remains immutable.
 

@@ -119,6 +119,19 @@ import { type Settings, settings } from "./settings";
 // requests; the pi-ai provider resolves it just-in-time per request.
 setCodexAttestationProvider(generateCodexAttestation);
 
+/**
+ * Bedrock guardrail fields to spread onto a model spec, dropping keys that a
+ * provider override left unset so an override never clobbers an existing value
+ * with `undefined`.
+ */
+function guardrailOverrideFields(override: ProviderOverride): Partial<ModelSpec<Api>> {
+	const fields: Partial<ModelSpec<Api>> = {};
+	if (override.guardrailIdentifier !== undefined) fields.guardrailIdentifier = override.guardrailIdentifier;
+	if (override.guardrailVersion !== undefined) fields.guardrailVersion = override.guardrailVersion;
+	if (override.guardrailTrace !== undefined) fields.guardrailTrace = override.guardrailTrace;
+	return fields;
+}
+
 /** Result of loading custom models config. */
 interface CustomModelsResult {
 	models?: CustomModelOverlay[];
@@ -703,7 +716,8 @@ export class ModelRegistry {
 		const withConfigModels = this.#mergeCustomModels(resolvedDefaults, select(this.#customModelOverlays));
 		const combined = this.#mergeCustomModels(withConfigModels, select(this.#runtimeModelOverlays));
 		const withModelOverrides = this.#applyModelOverrides(collapseBuiltModelVariants(combined), this.#modelOverrides);
-		return this.#applyLlamaCppModelFixups(this.#applyRuntimeProviderOverrides(withModelOverrides));
+		const withProviderGuardrails = this.#applyProviderGuardrailOverrides(withModelOverrides);
+		return this.#applyLlamaCppModelFixups(this.#applyRuntimeProviderOverrides(withProviderGuardrails));
 	}
 
 	#composeStaticModels(providerFilter?: ReadonlySet<string>): Model<Api>[] {
@@ -1128,7 +1142,7 @@ export class ModelRegistry {
 		const configuredProviders = new Set(Object.keys(value.providers ?? {}));
 		for (const [providerName, providerConfig] of providerEntries) {
 			const resolvedProviderHeaders = resolveConfigHeaders(providerConfig.headers);
-			// Always set overrides when baseUrl/headers/apiKey/authHeader/compat/disableStrictTools/transport are present
+			// Always set overrides when baseUrl/headers/apiKey/authHeader/compat/disableStrictTools/guardrail*/transport are present
 			if (
 				providerConfig.baseUrl ||
 				resolvedProviderHeaders ||
@@ -1136,6 +1150,7 @@ export class ModelRegistry {
 				providerConfig.authHeader !== undefined ||
 				providerConfig.compat ||
 				providerConfig.disableStrictTools ||
+				providerConfig.guardrailIdentifier ||
 				providerConfig.remoteCompaction ||
 				providerConfig.transport
 			) {
@@ -1151,6 +1166,9 @@ export class ModelRegistry {
 					compat: mergeCompat(providerConfig.compat, disableStrictCompat),
 					remoteCompaction: providerConfig.remoteCompaction,
 					transport: providerConfig.transport,
+					guardrailIdentifier: providerConfig.guardrailIdentifier,
+					guardrailVersion: providerConfig.guardrailVersion,
+					guardrailTrace: providerConfig.guardrailTrace,
 				});
 			}
 
@@ -1273,7 +1291,10 @@ export class ModelRegistry {
 		const withConfigModels = this.#mergeCustomModels(resolved, this.#customModelOverlays);
 		const combined = this.#mergeCustomModels(withConfigModels, this.#runtimeModelOverlays);
 		const withModelOverrides = this.#applyModelOverrides(collapseBuiltModelVariants(combined), this.#modelOverrides);
-		this.#unprojectedModels = this.#applyLlamaCppModelFixups(this.#applyRuntimeProviderOverrides(withModelOverrides));
+		const withProviderGuardrails = this.#applyProviderGuardrailOverrides(withModelOverrides);
+		this.#unprojectedModels = this.#applyLlamaCppModelFixups(
+			this.#applyRuntimeProviderOverrides(withProviderGuardrails),
+		);
 		this.#models = this.#applyRuntimeModelModifiers(this.#unprojectedModels);
 	}
 
@@ -1738,6 +1759,23 @@ export class ModelRegistry {
 		>,
 	): Model<Api> {
 		return buildModel(this.#applyProviderTransportOverride(toModelSpec(model), override));
+	}
+
+	#applyProviderGuardrailOverrides(models: Model<Api>[]): Model<Api>[] {
+		if (this.#providerOverrides.size === 0) return models;
+		return models.map(model => {
+			const override = this.#providerOverrides.get(model.provider);
+			if (!override) return model;
+			const guardrailFields = guardrailOverrideFields(override);
+			if (
+				guardrailFields.guardrailIdentifier === undefined &&
+				guardrailFields.guardrailVersion === undefined &&
+				guardrailFields.guardrailTrace === undefined
+			) {
+				return model;
+			}
+			return buildModel({ ...toModelSpec(model), ...guardrailFields } as ModelSpec<Api>);
+		});
 	}
 
 	#applyRuntimeProviderOverrides(models: Model<Api>[]): Model<Api>[] {
@@ -2315,12 +2353,13 @@ export class ModelRegistry {
 				nextModels.push(finalizeCustomModel(overlay, { useDefaults: true }));
 			}
 			const runtimeTransportOverride = this.#runtimeProviderOverrides.get(providerName);
-			this.#unprojectedModels = runtimeTransportOverride
+			const nextModelsWithTransport = runtimeTransportOverride
 				? nextModels.map(model => {
 						if (model.provider !== providerName) return model;
 						return this.#applyProviderTransportOverrideToModel(model, runtimeTransportOverride);
 					})
 				: nextModels;
+			this.#unprojectedModels = this.#applyProviderGuardrailOverrides(nextModelsWithTransport);
 
 			this.#models = this.#applyRuntimeModelModifiers(this.#unprojectedModels);
 			this.#invalidateProviderModelCache(providerName);

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.0.1] - 2026-08-23
+
 ### Added
 
 - Fixed `google-gemini-cli` model refresh returning only bundled models for Gemini Code Assist Standard accounts, whose credential is not authorized for the Antigravity `fetchAvailableModels` endpoint (HTTP 403). Discovery now falls back to the account's own `retrieveUserQuota` list on Cloud Code Assist, surfacing models such as `gemini-3.5-flash` ([#9315](https://github.com/can1357/oh-my-pi/issues/9315)).
@@ -14,6 +16,9 @@
 - Fixed `opencode-go/deepseek-v4-flash` exposing the generic `minimal`/`low`/`medium`/`high`/`xhigh` thinking ladder instead of DeepSeek V4's real `low`/`high`/`max` tiers. The model is pinned to the Responses transport (the Go gateway serves it only at `/responses`), which the DeepSeek effort branch did not admit, so it fell through to the default ladder; the branch now covers the `openai-responses` transport like every other host ([#9134](https://github.com/can1357/oh-my-pi/issues/9134)).
 - Fixed protobuf map decoding corrupting entries when a key is `__proto__`, which dropped that argument and replayed spurious numeric arguments ([#9394](https://github.com/can1357/oh-my-pi/issues/9394)).
 
+### Added
+
+- Added Amazon Bedrock guardrail metadata to model definitions for Converse requests.
 ## [18.0.0] - 2026-08-22
 
 ### Added

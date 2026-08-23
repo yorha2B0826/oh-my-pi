@@ -361,4 +361,120 @@ describe("InteractiveMode todo HUD anchor", () => {
 		const root = lines.find(line => line.includes("TODO"));
 		expect(root?.trim()).toBe("TODO");
 	});
+
+	describe("compact todo for small terminal height (< 18 rows)", () => {
+		function setTerminalRows(rows: number): void {
+			Object.defineProperty(mode.ui.terminal, "rows", {
+				get: () => rows,
+				configurable: true,
+			});
+		}
+
+		afterEach(() => {
+			setTerminalRows(24);
+			mode.loadingAnimation = undefined;
+			mode.statusContainer.disposeChildren();
+		});
+
+		it("renders todo as a single line item aligned to the right when terminal height < 18", () => {
+			setTerminalRows(15);
+			mode.setTodos([
+				{
+					name: "Phase 1",
+					tasks: [
+						{ content: "Setup database", status: "completed" },
+						{ content: "Create API endpoints", status: "in_progress" },
+						{ content: "Write tests", status: "pending" },
+					],
+				},
+			]);
+
+			// todoContainer is empty in compact mode
+			expect(mode.todoContainer.render(100)).toHaveLength(0);
+
+			// statusContainer renders the compact right-aligned todo above editor
+			const rendered = mode.statusContainer.render(100);
+			expect(rendered.length).toBeGreaterThan(0);
+			const lastLine = Bun.stripANSI(rendered[rendered.length - 1] ?? "");
+			expect(lastLine).toContain("TODO 1/3");
+			expect(lastLine).toContain("Create API endpoints");
+			// Right-aligned: ends with the todo text (with trailing space)
+			expect(lastLine.trimEnd().endsWith("Create API endpoints")).toBe(true);
+			expect(lastLine.startsWith(" ")).toBe(true);
+		});
+
+		it("places compact todo on the right side of the active loader / intent spinner", () => {
+			setTerminalRows(14);
+			mode.setTodos([
+				{
+					name: "Tasks",
+					tasks: [
+						{ content: "Inspect server", status: "in_progress" },
+						{ content: "Deploy fix", status: "pending" },
+					],
+				},
+			]);
+
+			mode.ensureLoadingAnimation();
+			mode.setWorkingMessage("Reading src/index.ts (esc to interrupt)");
+
+			expect(mode.todoContainer.render(120)).toHaveLength(0);
+
+			const rendered = mode.statusContainer.render(120);
+			expect(rendered.length).toBeGreaterThanOrEqual(2);
+			const lastLine = Bun.stripANSI(rendered[rendered.length - 1] ?? "");
+			// Left side has the intent spinner/message
+			expect(lastLine).toContain("Reading src/index.ts");
+			// Right side has the compact todo
+			expect(lastLine).toContain("TODO 0/2");
+			expect(lastLine).toContain("Inspect server");
+			// Left message comes before right todo
+			expect(lastLine.indexOf("Reading src/index.ts")).toBeLessThan(lastLine.indexOf("TODO 0/2"));
+		});
+
+		it("shows completed summary when all tasks are done in compact mode", () => {
+			setTerminalRows(16);
+			mode.setTodos([
+				{
+					name: "Tasks",
+					tasks: [
+						{ content: "Task 1", status: "completed" },
+						{ content: "Task 2", status: "completed" },
+					],
+				},
+			]);
+
+			const rendered = mode.statusContainer.render(100);
+			const lastLine = Bun.stripANSI(rendered[rendered.length - 1] ?? "");
+			expect(lastLine).toContain("TODO 2/2");
+			expect(lastLine).toContain("done");
+		});
+
+		it("switches dynamically between multi-line HUD and compact single line on resize", () => {
+			mode.setTodos([
+				{
+					name: "Tasks",
+					tasks: [{ content: "Refactor router", status: "in_progress" }],
+				},
+			]);
+
+			// Terminal >= 18 rows: full tree HUD
+			setTerminalRows(24);
+			expect(mode.todoContainer.render(100).length).toBeGreaterThan(0);
+			expect(mode.statusContainer.render(100)).toHaveLength(0);
+
+			// Terminal < 18 rows: compact mode
+			setTerminalRows(15);
+			expect(mode.todoContainer.render(100)).toHaveLength(0);
+			expect(mode.statusContainer.render(100).length).toBeGreaterThan(0);
+			const compactLine = Bun.stripANSI(mode.statusContainer.render(100).slice(-1)[0] ?? "");
+			expect(compactLine).toContain("TODO 0/1");
+			expect(compactLine).toContain("Refactor router");
+
+			// Resize back >= 18 rows
+			setTerminalRows(24);
+			expect(mode.todoContainer.render(100).length).toBeGreaterThan(0);
+			expect(mode.statusContainer.render(100)).toHaveLength(0);
+		});
+	});
 });
