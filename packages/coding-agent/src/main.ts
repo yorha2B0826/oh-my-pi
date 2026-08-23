@@ -127,7 +127,8 @@ async function checkForNewVersion(currentVersion: string): Promise<string | unde
 		return;
 	}
 	try {
-		const release = await getLatestRelease({ timeoutMs: 5_000 });
+		const channel = settings.get("update.channel");
+		const release = await getLatestRelease({ timeoutMs: 5_000, channel });
 		return Bun.semver.order(release.version, currentVersion) > 0 ? release.version : undefined;
 	} catch {
 		return undefined;

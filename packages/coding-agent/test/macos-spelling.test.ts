@@ -21,6 +21,24 @@ function decorationContext(editorText: string, line: number = 0, startCol: numbe
 }
 
 describe("macOS spelling feature gates", () => {
+	it("keeps typo undercurls visible while a changed line is rechecked", async () => {
+		const secondCheck = Promise.withResolvers<readonly { start: number; length: number }[]>();
+		const checkSpelling = mock((text: string) =>
+			text === "recieved" ? Promise.resolve([{ start: 0, length: 8 }]) : secondCheck.promise,
+		);
+		const provider = new MacOSSpellingProvider(backend({ checkSpelling }));
+		provider.setFeatures({ typoDetection: true, autocomplete: false, autocorrect: false });
+		const updated = Promise.withResolvers<void>();
+		provider.onUpdate = updated.resolve;
+
+		provider.decorateTypos("recieved", decorationContext("recieved"));
+		await updated.promise;
+		expect(provider.decorateTypos("recieved!", decorationContext("recieved!"))).toContain("\x1b[4:3m");
+
+		secondCheck.resolve([]);
+		await Promise.resolve();
+	});
+
 	it("enables typo detection without enabling autocomplete or autocorrect", async () => {
 		const checkSpelling = mock(async () => [{ start: 0, length: 8 }]);
 		const completeWord = mock(async () => ["received"]);

@@ -2793,6 +2793,31 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			return writeRegistration;
 		};
 
+		// Goal mode can be enabled after the session was created (settings UI,
+		// `/set goal.enabled true`). The eager registration above only runs at
+		// creation, so a runtime enable would leave the registry without `goal`
+		// and `#enterGoalMode`'s `setActiveToolsByName([...tools, "goal"])` would
+		// silently drop the unknown name — goal mode starts, the model is told to
+		// use the `goal` tool, and the call fails (issue #9444). Register it
+		// lazily on demand, mirroring `ensureWriteRegistered`.
+		let goalRegistration: Promise<boolean> | undefined;
+		const ensureGoalRegistered = (): Promise<boolean> => {
+			if (toolRegistry.has("goal")) return Promise.resolve(true);
+			if (restrictToolNames || !settings.get("goal.enabled")) return Promise.resolve(false);
+			goalRegistration ??= (async () => {
+				const goalTool = await logger.time("createTools:goal:session", HIDDEN_TOOLS.goal, toolSession);
+				if (!goalTool || toolRegistry.has("goal")) return toolRegistry.has("goal");
+				const nativeGoal = wrapToolWithMetaNotice(goalTool);
+				toolRegistry.set(goalTool.name, new ExtensionToolWrapper(nativeGoal, extensionRunner) as Tool);
+				builtInRegistryToolNames.add(goalTool.name);
+				nativeToolsByName.set(goalTool.name, nativeGoal);
+				return true;
+			})().finally(() => {
+				goalRegistration = undefined;
+			});
+			return goalRegistration;
+		};
+
 		// Existing staged/device paths need write registered before active-set assembly.
 		// Deferred MCP also registers it now, but refresh activates it only after a server connects.
 		// xd:// mounts never register write: xdev state only exists when the session
@@ -3535,6 +3560,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			presentationPinnedToolNames: explicitlyRequestedToolNameSet,
 			setActiveToolNames: setSessionActiveToolNames,
 			ensureWriteRegistered,
+			ensureGoalRegistered,
 			getMcpServerInstructions: mcpManager
 				? () => {
 						const raw = mcpManager.getServerInstructions();
