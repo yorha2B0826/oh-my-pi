@@ -174,9 +174,12 @@ export class ModelRegistry {
 	#models: Model<Api>[] = [];
 	#unprojectedModels: Model<Api>[] = [];
 	#hasFullSnapshot = false;
-	#cachedStandardModels: Model<Api>[] = [];
+	#cachedStandardModelsByProvider: Map<string, Model<Api>[]> = new Map();
+	#pendingStandardCacheProviders: Set<string> = new Set();
 	#cachedDiscoverableModels: Model<Api>[] = [];
 	#cachedAuthoritativeProviders: Set<string> = new Set();
+	#runtimeDiscoveredModels: Model<Api>[] = [];
+	#runtimeAuthoritativeProviders: Set<string> = new Set();
 	#internedStaticModels: Map<string, Model<Api>> = new Map();
 	#providerLookupSnapshots: Map<string, Model<Api>[]> = new Map();
 	#customProviderApiKeys: Map<string, string> = new Map();
@@ -570,11 +573,11 @@ export class ModelRegistry {
 			models: customModels = [],
 			overrides = new Map(),
 			modelOverrides = new Map(),
-			keylessProviders = new Set(),
+			keylessProviders = new Set<string>(),
 			discoverableProviders = [],
-			configuredProviders = new Set(),
+			configuredProviders = new Set<string>(),
 			error: configError,
-		} = this.#loadCustomModels();
+		} = logger.time("modelRegistry:loadCustomModels", () => this.#loadCustomModels());
 		this.#configError = configError;
 		this.#keylessProviders = keylessProviders;
 		this.#discoverableProviders = discoverableProviders;
@@ -583,25 +586,16 @@ export class ModelRegistry {
 		this.#modelOverrides = modelOverrides;
 
 		this.#addImplicitDiscoverableProviders(configuredProviders);
-		const cachedStandardResult = this.#loadCachedStandardProviderModels();
-		this.#cachedStandardModels = this.#applyHardcodedModelPolicies(cachedStandardResult.models);
-		this.#cachedDiscoverableModels = this.#applyHardcodedModelPolicies(this.#loadCachedDiscoverableModels());
-		// Only drop bundled fallback models when the cached project-catalog row is
-		// itself fresh AND authoritative. A stale or non-authoritative snapshot
-		// (e.g. after ADC discovery failure rewrote the row with authoritative=0)
-		// must not strip bundled Vertex Gemini entries — that would leave only the
-		// stale project-scoped rows in API-key-only environments.
-		this.#cachedAuthoritativeProviders = new Set<string>();
-		for (const provider of providersWithAuthoritativeProjectCatalog(this.#cachedStandardModels)) {
-			if (cachedStandardResult.authoritativeFreshProviders.has(provider)) {
-				this.#cachedAuthoritativeProviders.add(provider);
-			}
-		}
-		for (const provider of cachedStandardResult.authoritativeFreshProviders) {
-			if (AUTHORITATIVE_RUNTIME_CATALOG_PROVIDERS.has(provider)) {
-				this.#cachedAuthoritativeProviders.add(provider);
-			}
-		}
+		const configuredDiscoveryProviders = new Set(this.#discoverableProviders.map(provider => provider.provider));
+		this.#pendingStandardCacheProviders = new Set(
+			STARTUP_MODEL_CACHE_PROVIDER_IDS.filter(
+				providerId =>
+					!configuredDiscoveryProviders.has(providerId) && !isCredentialScopedModelCacheProvider(providerId),
+			),
+		);
+		this.#cachedDiscoverableModels = logger.time("modelRegistry:loadDiscoverableModels", () =>
+			this.#applyHardcodedModelPolicies(this.#loadCachedDiscoverableModels()),
+		);
 		this.#lastStaticLoadMtime = this.#modelsConfigFile.getMtimeMs();
 	}
 
@@ -609,14 +603,21 @@ export class ModelRegistry {
 		this.#models = [];
 		this.#unprojectedModels = [];
 		this.#hasFullSnapshot = false;
+		this.#cachedStandardModelsByProvider.clear();
+		this.#pendingStandardCacheProviders.clear();
+		this.#cachedAuthoritativeProviders.clear();
+		this.#runtimeDiscoveredModels = [];
+		this.#runtimeAuthoritativeProviders.clear();
 		this.#internedStaticModels.clear();
 		this.#providerLookupSnapshots.clear();
 	}
 
 	#knownStaticProviders(): string[] {
 		const providers = new Set<string>(getBundledProviders());
-		for (const model of this.#cachedStandardModels) providers.add(model.provider);
+		for (const provider of this.#pendingStandardCacheProviders) providers.add(provider);
+		for (const provider of this.#cachedStandardModelsByProvider.keys()) providers.add(provider);
 		for (const model of this.#cachedDiscoverableModels) providers.add(model.provider);
+		for (const model of this.#runtimeDiscoveredModels) providers.add(model.provider);
 		for (const model of this.#customModelOverlays) providers.add(model.provider);
 		for (const model of this.#runtimeModelOverlays) providers.add(model.provider);
 		return [...providers];
@@ -684,16 +685,21 @@ export class ModelRegistry {
 	#composeUnprojectedStaticModels(providerFilter?: ReadonlySet<string>): Model<Api>[] {
 		const select = <T extends { provider: string }>(models: readonly T[]): T[] =>
 			providerFilter ? models.filter(model => providerFilter.has(model.provider)) : [...models];
+		const cachedStandardModels = this.#getCachedStandardModels(providerFilter);
 		let builtInModels = this.#applyHardcodedModelPolicies(
 			this.#loadBuiltInModels(this.#providerOverrides, providerFilter),
 		);
 		if (this.#cachedAuthoritativeProviders.size > 0) {
 			builtInModels = dropProviderModels(builtInModels, this.#cachedAuthoritativeProviders);
 		}
-		const resolvedDefaults = this.#mergeResolvedModels(
-			this.#mergeResolvedModels(builtInModels, select(this.#cachedStandardModels)),
+		let resolvedDefaults = this.#mergeResolvedModels(
+			this.#mergeResolvedModels(builtInModels, cachedStandardModels),
 			select(this.#cachedDiscoverableModels),
 		);
+		if (this.#runtimeAuthoritativeProviders.size > 0) {
+			resolvedDefaults = dropProviderModels(resolvedDefaults, this.#runtimeAuthoritativeProviders);
+		}
+		resolvedDefaults = this.#mergeResolvedModels(resolvedDefaults, select(this.#runtimeDiscoveredModels));
 		const withConfigModels = this.#mergeCustomModels(resolvedDefaults, select(this.#customModelOverlays));
 		const combined = this.#mergeCustomModels(withConfigModels, select(this.#runtimeModelOverlays));
 		const withModelOverrides = this.#applyModelOverrides(collapseBuiltModelVariants(combined), this.#modelOverrides);
@@ -789,14 +795,13 @@ export class ModelRegistry {
 		return resolveModelCacheProviderId(providerId, { baseUrl });
 	}
 
-	#loadCachedStandardProviderModels(): { models: Model<Api>[]; authoritativeFreshProviders: Set<string> } {
-		const configuredDiscoveryProviders = new Set(this.#discoverableProviders.map(provider => provider.provider));
-		const cachedModels: Model<Api>[] = [];
+	#loadCachedStandardProviderModels(providerIds: readonly string[]): {
+		modelsByProvider: Map<string, Model<Api>[]>;
+		authoritativeFreshProviders: Set<string>;
+	} {
+		const modelsByProvider = new Map<string, Model<Api>[]>();
 		const authoritativeFreshProviders = new Set<string>();
-		for (const providerId of STARTUP_MODEL_CACHE_PROVIDER_IDS) {
-			if (configuredDiscoveryProviders.has(providerId) || isCredentialScopedModelCacheProvider(providerId)) {
-				continue;
-			}
+		for (const providerId of providerIds) {
 			const cacheProviderId = this.#resolveStartupModelCacheProviderId(providerId);
 			const cache = readModelCache<Api>(cacheProviderId, 24 * 60 * 60 * 1000, Date.now, this.#cacheDbPath);
 			if (!cache) {
@@ -854,9 +859,50 @@ export class ModelRegistry {
 						} as ModelSpec<Api>),
 					)
 				: withTransport.map(model => buildModel(model));
-			cachedModels.push(...this.#applyProviderModelOverrides(providerId, withCompat));
+			const resolved = this.#applyProviderModelOverrides(providerId, withCompat);
+			modelsByProvider.set(providerId, this.#applyHardcodedModelPolicies(resolved));
 		}
-		return { models: cachedModels, authoritativeFreshProviders };
+		return { modelsByProvider, authoritativeFreshProviders };
+	}
+
+	/**
+	 * Materialize only the cached provider slices needed by this composition.
+	 * A full snapshot (`providerFilter` omitted) drains every pending provider in
+	 * descriptor order; provider-scoped lookups leave unrelated JSON rows
+	 * unparsed until their own first read.
+	 */
+	#getCachedStandardModels(providerFilter?: ReadonlySet<string>): Model<Api>[] {
+		const providerIds = STARTUP_MODEL_CACHE_PROVIDER_IDS.filter(
+			providerId =>
+				this.#pendingStandardCacheProviders.has(providerId) &&
+				(providerFilter === undefined || providerFilter.has(providerId)),
+		);
+		if (providerIds.length > 0) {
+			for (const providerId of providerIds) this.#pendingStandardCacheProviders.delete(providerId);
+			const loaded = logger.time("modelRegistry:loadCachedStandardModels", () =>
+				this.#loadCachedStandardProviderModels(providerIds),
+			);
+			for (const [providerId, models] of loaded.modelsByProvider) {
+				this.#cachedStandardModelsByProvider.set(providerId, models);
+			}
+			for (const providerId of loaded.authoritativeFreshProviders) {
+				const models = loaded.modelsByProvider.get(providerId) ?? [];
+				if (
+					providersWithAuthoritativeProjectCatalog(models).has(providerId) ||
+					AUTHORITATIVE_RUNTIME_CATALOG_PROVIDERS.has(providerId)
+				) {
+					this.#cachedAuthoritativeProviders.add(providerId);
+				}
+			}
+		}
+
+		const models: Model<Api>[] = [];
+		for (const providerId of STARTUP_MODEL_CACHE_PROVIDER_IDS) {
+			if (providerFilter && !providerFilter.has(providerId)) continue;
+			const providerModels = this.#cachedStandardModelsByProvider.get(providerId);
+			if (providerModels) models.push(...providerModels);
+		}
+		return models;
 	}
 
 	#configuredDiscoveryHeaderFallback(providerId: string): Record<string, string> | undefined {
@@ -1186,12 +1232,16 @@ export class ModelRegistry {
 		if (discovered.length === 0 && builtInDiscovery.authoritativeProviders.size === 0) {
 			return;
 		}
-		this.#ensureFullSnapshot();
+		const touchedProviders = new Set(discovered.map(model => model.provider));
+		for (const provider of builtInDiscovery.authoritativeProviders) touchedProviders.add(provider);
+		const existingModels = this.#hasFullSnapshot
+			? this.#unprojectedModels
+			: this.#composeUnprojectedStaticModels(touchedProviders);
 		const discoveredModels = this.#applyHardcodedModelPolicies(
 			discovered.map(model =>
 				mergeDiscoveredModel(
 					model,
-					resolveProviderModelReference(model.provider, model.id, this.#unprojectedModels),
+					resolveProviderModelReference(model.provider, model.id, existingModels),
 					this.#providerOverrides.get(model.provider),
 				),
 			),
@@ -1200,6 +1250,21 @@ export class ModelRegistry {
 		for (const provider of builtInDiscovery.authoritativeProviders) {
 			authoritativeProviders.add(provider);
 		}
+
+		this.#runtimeDiscoveredModels = this.#runtimeDiscoveredModels.filter(
+			model => !touchedProviders.has(model.provider),
+		);
+		this.#runtimeDiscoveredModels.push(...discoveredModels);
+		for (const provider of touchedProviders) {
+			if (authoritativeProviders.has(provider)) {
+				this.#runtimeAuthoritativeProviders.add(provider);
+			} else {
+				this.#runtimeAuthoritativeProviders.delete(provider);
+			}
+			this.#invalidateProviderModelCache(provider);
+		}
+		if (!this.#hasFullSnapshot) return;
+
 		const baseModels =
 			authoritativeProviders.size > 0
 				? dropProviderModels(this.#unprojectedModels, authoritativeProviders)
@@ -1828,16 +1893,32 @@ export class ModelRegistry {
 	}
 
 	/**
+	 * Get authenticated models for an explicit provider set without materializing
+	 * unrelated cached catalogs. Startup role resolution uses this before the
+	 * full model picker is needed.
+	 */
+	getAvailableForProviders(providers: ReadonlySet<string>): Model<Api>[] {
+		const requested = new Set([...providers].map(provider => provider.trim().toLowerCase()).filter(Boolean));
+		const isProviderAvailable = this.#createProviderAvailabilityCheck();
+		if (this.#hasFullSnapshot) {
+			return this.#models.filter(
+				model => requested.has(model.provider.toLowerCase()) && isProviderAvailable(model.provider),
+			);
+		}
+		const availableProviders = new Set(
+			this.#knownStaticProviders().filter(
+				provider => requested.has(provider.toLowerCase()) && isProviderAvailable(provider),
+			),
+		);
+		return this.#composeStaticModels(availableProviders);
+	}
+
+	/**
 	 * Get only models that have auth configured.
 	 * This is a fast check that doesn't refresh OAuth tokens.
 	 */
 	getAvailable(): Model<Api>[] {
-		const isProviderAvailable = this.#createProviderAvailabilityCheck();
-		if (this.#hasFullSnapshot) {
-			return this.#models.filter(model => isProviderAvailable(model.provider));
-		}
-		const availableProviders = new Set(this.#knownStaticProviders().filter(isProviderAvailable));
-		return this.#composeStaticModels(availableProviders);
+		return this.getAvailableForProviders(new Set(this.#knownStaticProviders()));
 	}
 
 	/**
@@ -2165,8 +2246,6 @@ export class ModelRegistry {
 			this.#reloadStaticModels();
 		}
 
-		this.#ensureFullSnapshot();
-
 		// Extension usage providers override built-ins/configured resolvers for the
 		// provider lifetime. #clearRuntimeProviderState removes this override when
 		// the owning extension is unregistered or replaced.
@@ -2204,6 +2283,30 @@ export class ModelRegistry {
 			this.#runtimeModelOverlays = this.#runtimeModelOverlays.filter(m => m.provider !== providerName);
 			this.#runtimeModelOverlays.push(...newOverlays);
 
+			// A modifier is explicitly a whole-catalog transform and may throw
+			// based on another provider's models. Preserve registration-time
+			// execution/error reporting by materializing only for this case.
+			if (config.oauth?.modifyModels && !this.#hasFullSnapshot) {
+				logger.time(`modelRegistry:materializeModifier:${providerName}`, () => this.#ensureFullSnapshot());
+			}
+			if (config.oauth?.modifyModels) {
+				this.#runtimeModelModifiers.set(providerName, config.oauth.modifyModels);
+			} else {
+				this.#runtimeModelModifiers.delete(providerName);
+			}
+			if (!this.#hasFullSnapshot) {
+				// Lazy compositions read runtime overlays directly. A whole-catalog
+				// modifier can affect providers beyond its owner, so discard every
+				// provider slice; an ordinary overlay only invalidates its provider.
+				if (config.oauth?.modifyModels) {
+					this.#providerLookupSnapshots.clear();
+					this.#internedStaticModels.clear();
+				} else {
+					this.#invalidateProviderModelCache(providerName);
+				}
+				return;
+			}
+
 			// Update the unprojected snapshot, then rerun every whole-catalog
 			// projection exactly once. Incremental projection is not safe because one
 			// provider's hook may inspect or suppress another provider's models.
@@ -2219,11 +2322,6 @@ export class ModelRegistry {
 					})
 				: nextModels;
 
-			if (config.oauth?.modifyModels) {
-				this.#runtimeModelModifiers.set(providerName, config.oauth.modifyModels);
-			} else {
-				this.#runtimeModelModifiers.delete(providerName);
-			}
 			this.#models = this.#applyRuntimeModelModifiers(this.#unprojectedModels);
 			this.#invalidateProviderModelCache(providerName);
 			return;
@@ -2294,13 +2392,15 @@ export class ModelRegistry {
 				transportOverride,
 			);
 			this.#runtimeProviderOverrides.set(providerName, nextRuntimeOverride);
-			this.#unprojectedModels = this.#applyLlamaCppModelFixups(
-				this.#unprojectedModels.map(model => {
-					if (model.provider !== providerName) return model;
-					return this.#applyProviderTransportOverrideToModel(model, transportOverride);
-				}),
-			);
-			this.#models = this.#applyRuntimeModelModifiers(this.#unprojectedModels);
+			if (this.#hasFullSnapshot) {
+				this.#unprojectedModels = this.#applyLlamaCppModelFixups(
+					this.#unprojectedModels.map(model => {
+						if (model.provider !== providerName) return model;
+						return this.#applyProviderTransportOverrideToModel(model, transportOverride);
+					}),
+				);
+				this.#models = this.#applyRuntimeModelModifiers(this.#unprojectedModels);
+			}
 			this.#invalidateProviderModelCache(providerName);
 		}
 	}

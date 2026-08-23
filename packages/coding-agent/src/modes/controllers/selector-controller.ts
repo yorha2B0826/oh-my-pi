@@ -3,7 +3,7 @@ import type { CompactionOutcome } from "@oh-my-pi/pi-agent-core/compaction";
 import { PASTE_CODE_LOGIN_PROVIDERS } from "@oh-my-pi/pi-ai";
 import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
 import type { OAuthProvider } from "@oh-my-pi/pi-ai/oauth/types";
-import type { Component, OverlayHandle, ResizeScrollbackMode } from "@oh-my-pi/pi-tui";
+import type { Component, OverlayHandle } from "@oh-my-pi/pi-tui";
 import { Loader, Spacer, setTuiTight, Text } from "@oh-my-pi/pi-tui";
 import { getAgentDbPath, getAgentDir, getProjectDir, normalizePathForComparison } from "@oh-my-pi/pi-utils";
 import {
@@ -524,7 +524,7 @@ export class SelectorController {
 				}
 				this.ctx.chatContainer.setToolActivityVisible(!hidden);
 				if (hidden) this.ctx.ui.clearInlineImages();
-				this.ctx.ui.resetDisplay();
+				this.ctx.ui.requestRender(true);
 				break;
 			}
 			case "terminal.showImages":
@@ -538,7 +538,7 @@ export class SelectorController {
 					}
 				}
 				if (!visible) this.ctx.ui.clearInlineImages();
-				this.ctx.ui.resetDisplay();
+				this.ctx.ui.requestRender(true);
 				break;
 			}
 			case "hideThinkingBlock":
@@ -548,10 +548,7 @@ export class SelectorController {
 						child.setHideThinkingBlock(this.ctx.effectiveHideThinkingBlock);
 					}
 				}
-				// Full clear + replay so blocks frozen in committed scrollback on
-				// ED3-risk terminals retire their stale snapshots too (see
-				// InputController.toggleThinkingBlockVisibility).
-				this.ctx.ui.resetDisplay();
+				this.ctx.ui.requestRender(true);
 				break;
 			case "proseOnlyThinking":
 				this.ctx.proseOnlyThinking = value as boolean;
@@ -560,7 +557,7 @@ export class SelectorController {
 						child.setProseOnlyThinking(value as boolean);
 					}
 				}
-				this.ctx.ui.resetDisplay();
+				this.ctx.ui.requestRender(true);
 				break;
 			case "omitThinking":
 				this.ctx.session.agent.hideThinkingSummary = value as boolean;
@@ -589,14 +586,6 @@ export class SelectorController {
 				setTuiTight(value as boolean);
 				this.ctx.ui.invalidate();
 				this.ctx.ui.requestRender();
-				break;
-
-			case "tui.scrollbackRebuild":
-				this.ctx.ui.setScrollbackRebuild(value as boolean);
-				break;
-
-			case "tui.resizeScrollback":
-				this.ctx.ui.setResizeScrollback(value as ResizeScrollbackMode);
 				break;
 
 			case "tui.renderMermaid":

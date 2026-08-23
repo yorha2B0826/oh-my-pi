@@ -494,6 +494,7 @@ async function runInteractiveMode(
 	initialMessage?: string,
 	initialImages?: ImageContent[],
 	joinLink?: string,
+	startBackgroundModelDiscovery?: () => Promise<void>,
 	startupLease?: ComposerLease,
 ): Promise<void> {
 	let mode: InteractiveMode;
@@ -538,10 +539,14 @@ async function runInteractiveMode(
 			: [];
 		playStartupSplash = showStartupSplash && setupScenes.length === 0;
 
-		await mode.init({
-			suppressWelcomeIntro: resuming || setupScenes.length > 0 || playStartupSplash,
-			clearInitialTerminalHistory: true,
-		});
+		await logger.time("InteractiveMode.init", () =>
+			mode.init({
+				suppressWelcomeIntro: resuming || setupScenes.length > 0 || playStartupSplash,
+				clearInitialTerminalHistory: true,
+				recentSessions: startupLease?.recentSessions,
+			}),
+		);
+		void startBackgroundModelDiscovery?.();
 	} catch (error) {
 		mode.stop();
 		throw error;
@@ -563,7 +568,9 @@ async function runInteractiveMode(
 	// Every in-process session load also uses `clearTerminalHistory`; cold launch
 	// follows the same clean-cutover path instead of preserving a previous run's
 	// transcript above the fresh one.
-	await mode.renderInitialMessages({ preserveExistingChat: true, clearTerminalHistory: true });
+	await logger.time("InteractiveMode.renderInitialMessages", () =>
+		mode.renderInitialMessages({ preserveExistingChat: true, clearTerminalHistory: true }),
+	);
 	// A resolved version check must not insert its banner into a partial transcript.
 	checkedVersionPromise.then(newVersion => {
 		if (!settings.get("startup.checkUpdate")) {
@@ -1413,12 +1420,18 @@ export async function runRootCommand(
 		if (!isInteractive) {
 			stopPendingStartupComposer();
 		}
-		// Create AuthStorage upfront. A configured-but-unreachable auth broker throws
-		// here; convert it to an actionable stderr message + clean exit instead of a
-		// raw uncaught stack trace (issue #8096).
+		// Auth and settings are independent; start both before awaiting either.
+		// A configured-but-unreachable auth broker still receives the actionable
+		// startup error below, while its cache/config I/O overlaps settings I/O.
+		const authStoragePromise = logger.time("discoverAuthStorage", deps.discoverAuthStorage ?? discoverAuthStorage);
+		authStoragePromise.catch(() => {});
+		const settingsPromise = deps.settings
+			? Promise.resolve(deps.settings)
+			: logger.time("settings:init", Settings.init, { cwd, configFiles: parsedArgs.config });
+		settingsPromise.catch(() => {});
 		let authStorage: AuthStorage;
 		try {
-			authStorage = await logger.time("discoverAuthStorage", deps.discoverAuthStorage ?? discoverAuthStorage);
+			authStorage = await authStoragePromise;
 		} catch (error) {
 			const message = await describeAuthBrokerStartupError(error);
 			if (message === null) throw error;
@@ -1429,8 +1442,7 @@ export async function runRootCommand(
 		// registry, so USTC model discovery is routed from its first network request.
 		if (isInteractive) await autoConnectIwanOnStartup();
 
-		const settingsInstance =
-			deps.settings ?? (await logger.time("settings:init", Settings.init, { cwd, configFiles: parsedArgs.config }));
+		const settingsInstance = await settingsPromise;
 		if (parsedArgs.approvalMode) {
 			// Runtime override (not persisted): every settings.get("tools.approvalMode") downstream
 			// sees this value. The wrapper still honours --auto-approve / --yolo on top of it.
@@ -1514,8 +1526,6 @@ export async function runRootCommand(
 			composerShape: settingsInstance.get("composer.shape") ?? "box",
 			showHardwareCursor: settingsInstance.get("showHardwareCursor"),
 			maxInlineImages: settingsInstance.get("tui.maxInlineImages"),
-			scrollbackRebuild: settingsInstance.get("tui.scrollbackRebuild"),
-			resizeScrollback: settingsInstance.get("tui.resizeScrollback"),
 			imeSafeCursor: settingsInstance.get("tui.imeSafeCursor"),
 			autocompleteMaxVisible: settingsInstance.get("autocompleteMaxVisible"),
 			spellingTypoDetection: settingsInstance.get("spelling.typoDetection"),
@@ -1870,7 +1880,14 @@ export async function runRootCommand(
 					)
 				: undefined;
 
-			const { session, setToolUIContext, modelFallbackMessage, lspServers, mcpManager } = await createSession({
+			const {
+				session,
+				setToolUIContext,
+				modelFallbackMessage,
+				lspServers,
+				mcpManager,
+				startBackgroundModelDiscovery,
+			} = await createSession({
 				...sessionOptions,
 				eventBus,
 				preloadedExtensions: extensionsResult,
@@ -1989,6 +2006,7 @@ export async function runRootCommand(
 						initialMessage,
 						initialImages,
 						parsedArgs.join,
+						startBackgroundModelDiscovery,
 						startupLease,
 					);
 				} finally {

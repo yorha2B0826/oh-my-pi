@@ -27,8 +27,23 @@ function parses(code: string, filePath: string): boolean {
 	return summarizeCode({ code: parseSource, path: filePath }).parsed;
 }
 
-/** Create the enabled per-tool-call observer that records newly introduced AST parse failures. */
-export function createEditBlackboxObserver(
+/**
+ * True when the edit turned a source file that parsed into one that no longer
+ * parses. Never true for languages the summarizer cannot parse at all, since
+ * the pre-image must have parsed.
+ */
+export function introducedParseFailure({ path: filePath, prev, next }: AppliedEditSnapshot): boolean {
+	// New content normally parses, so test it first and avoid re-parsing the
+	// pre-image on the overwhelmingly common successful-edit path.
+	return !parses(next, filePath) && parses(prev, filePath);
+}
+
+/**
+ * Create the enabled per-tool-call recorder that appends parse-regression
+ * snapshots to the blackbox log. Callers gate invocations on
+ * {@link introducedParseFailure}.
+ */
+export function createEditBlackboxRecorder(
 	session: ToolSession,
 	variant: EditMode,
 	arg: unknown,
@@ -37,11 +52,8 @@ export function createEditBlackboxObserver(
 	const logPath = path.join(session.settings.getAgentDir(), EDIT_BLACKBOX_FILE);
 	const model = session.getActiveModelString?.() ?? "unknown";
 
-	return async ({ path: filePath, prev, next }) => {
+	return async ({ prev, next }) => {
 		try {
-			// New content normally parses, so test it first and avoid re-parsing the
-			// pre-image on the overwhelmingly common successful-edit path.
-			if (parses(next, filePath) || !parses(prev, filePath)) return;
 			await fs.promises.appendFile(logPath, `${JSON.stringify({ prev, new: next, model, variant, arg })}\n`);
 		} catch (error) {
 			// Recording is diagnostic only. The edit has already committed, so a

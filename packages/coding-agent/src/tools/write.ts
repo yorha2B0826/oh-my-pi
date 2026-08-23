@@ -1394,10 +1394,9 @@ function normalizeDisplayText(text: unknown): string {
  * Minimum line-number gutter width for write previews. The streaming preview's
  * gutter must stay byte-stable as the line count grows: a width derived purely
  * from `String(totalLines).length` widens at the 10/100/1000-line crossings,
- * rewriting every already-rendered row — which forces the transcript's commit
- * audit to recommit the block's committed prefix (a full duplicate in native
- * scrollback). Reserving 3 digits keeps the gutter constant through 999 lines
- * and keeps the streamed rows byte-identical to the final result render.
+ * causing the live preview to jitter. Reserving 3 digits keeps the gutter
+ * constant through 999 lines and keeps the streamed rows aligned with the
+ * final result render.
  */
 const WRITE_GUTTER_MIN_WIDTH = 3;
 

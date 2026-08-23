@@ -1,3 +1,4 @@
+import * as nodePath from "node:path";
 import { MismatchError as HashlineMismatchError } from "@oh-my-pi/hashline";
 import hashlineGrammar from "@oh-my-pi/hashline/grammar.lark" with { type: "text" };
 import hashlineDescription from "@oh-my-pi/hashline/prompt.md" with { type: "text" };
@@ -15,7 +16,7 @@ import { truncateForPrompt } from "../tools/approval";
 import { findUniqueWorkspaceSuffix, isInternalUrlPath, resolveFileWriteApprovalTier } from "../tools/path-utils";
 import { resolvePlanPath } from "../tools/plan-mode-guard";
 import { type EditMode, normalizeEditMode, resolveEditMode } from "../utils/edit-mode";
-import { type AppliedEditObserver, createEditBlackboxObserver } from "./blackbox";
+import { type AppliedEditObserver, createEditBlackboxRecorder, introducedParseFailure } from "./blackbox";
 import { executeHashlineSingle, hashlineEditParamsSchema } from "./hashline";
 import { type ApplyPatchParams, applyPatchSchema, expandApplyPatchToEntries } from "./modes/apply-patch";
 import applyPatchGrammar from "./modes/apply-patch.lark" with { type: "text" };
@@ -543,8 +544,37 @@ export class EditTool implements AgentTool<TInput> {
 		context?: AgentToolContext,
 	): Promise<AgentToolResult<EditToolDetails, TInput>> {
 		const modeDefinition = this.#getModeDefinition();
-		const onApplied = createEditBlackboxObserver(this.session, this.mode, params);
-		return modeDefinition.execute(this, params, signal, getLspBatchRequest(context?.toolCall), onApplied, onUpdate);
+		const record = createEditBlackboxRecorder(this.session, this.mode, params);
+		const brokenPaths: string[] = [];
+		const onApplied: AppliedEditObserver = async snapshot => {
+			// Diagnostic only: the edit has already committed, so a guard failure
+			// must never turn it into a reported edit failure.
+			try {
+				if (!introducedParseFailure(snapshot)) return;
+				brokenPaths.push(nodePath.relative(this.session.cwd, snapshot.path) || snapshot.path);
+				await record?.(snapshot);
+			} catch {
+				// Parse probing is best-effort; skip the warning rather than fail.
+			}
+		};
+		const result = await modeDefinition.execute(
+			this,
+			params,
+			signal,
+			getLspBatchRequest(context?.toolCall),
+			onApplied,
+			onUpdate,
+		);
+		if (brokenPaths.length > 0) {
+			result.content = [
+				...result.content,
+				{
+					type: "text",
+					text: `Warning: ${brokenPaths.join(", ")} no longer parses after this edit. The change was applied; re-read the edited region and fix the syntax, or revert if unintended.`,
+				},
+			];
+		}
+		return result;
 	}
 
 	#getModeDefinition(): EditModeDefinition {

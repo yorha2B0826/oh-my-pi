@@ -48,6 +48,70 @@ describe("sloppy v8", () => {
 		);
 	});
 
+	test("splits a selection containing literal dividers at the middle divider", () => {
+		const content = 'row("│ a │", x);\n';
+		const notes: string[] = [];
+		const input = inlineOperation('row(⟪"│ a │", x│"│ b │", y⟫);');
+
+		expect(variant.apply(content, input, { path: "box.ts", notes })).toBe('row("│ b │", y);\n');
+		expect(notes.join("\n")).toMatch(/middle one was read as the divider/);
+	});
+
+	test("reads a trailing divider as deletion when the selection contains literal dividers", () => {
+		const content = 'a();\ndraw("│");\nb();\n';
+		const notes: string[] = [];
+		const input = inlineOperation('⟪draw("│");\n│⟫');
+
+		expect(variant.apply(content, input, { path: "box.ts", notes })).toBe("a();\nb();\n");
+		expect(notes.join("\n")).toMatch(/read as a deletion of the selected text with the inner/);
+	});
+
+	test("reads an even divider count without a trailing divider as deletion of the selection", () => {
+		const content = 't("x│y│z");\nkeep();\n';
+		const notes: string[] = [];
+		const input = inlineOperation('t("⟪x│y│z⟫");');
+
+		expect(variant.apply(content, input, { path: "box.ts", notes })).toBe('t("");\nkeep();\n');
+		expect(notes.join("\n")).toMatch(/no unambiguous divider/);
+	});
+
+	test("anchors an add run above a gap to its preceding line", () => {
+		const content = "use std::{\n\tfs,\n\titer,\n};\n\nfn main() {\n\trun();\n}\n";
+		const input = inlineOperation("\tfs,\n＋\tio,\n…\nfn main() {");
+
+		expect(variant.apply(content, input, context)).toBe(
+			"use std::{\n\tfs,\n\tio,\n\titer,\n};\n\nfn main() {\n\trun();\n}\n",
+		);
+	});
+
+	test("replaces the whole line when a bare selection's REWRITE restates it", () => {
+		const content = "  screen = [y -> Blank],  \\* viewport\nnext();\n";
+		const notes: string[] = [];
+		const input = operation(
+			"  screen = [y -> ⟪Blank⟫],  \\* viewport",
+			"  screen = [y -> IF y = 1 THEN SRow ELSE Blank],  \\* row 1 is shell",
+		);
+
+		expect(variant.apply(content, input, { path: "spec.tla", notes })).toBe(
+			"  screen = [y -> IF y = 1 THEN SRow ELSE Blank],  \\* row 1 is shell\nnext();\n",
+		);
+		expect(notes.join("\n")).toMatch(/restated the whole selection-bearing line/);
+	});
+
+	test("keeps a mid-line ellipsis in REWRITE literal when the capture is multi-line", () => {
+		const content = "function f() {\n  a();\n  b();\n}\n";
+		const input = operation("function f() {\n…\n}", "function f() {\n  return `${x}[… ]${y}`;\n}");
+
+		expect(variant.apply(content, input, context)).toBe("function f() {\n  return `${x}[… ]${y}`;\n}\n");
+	});
+
+	test("applies add lines containing literal selection markers verbatim", () => {
+		const content = "run();\ndone();\n";
+		const input = inlineOperation("run();\n＋const sel = '⟪a│b⟫';");
+
+		expect(variant.apply(content, input, context)).toBe("run();\nconst sel = '⟪a│b⟫';\ndone();\n");
+	});
+
 	test("inserts an add line after its anchor", () => {
 		const content = "anyhow = { workspace = true }\nitertools = { workspace = true }\ntokio = { workspace = true }\n";
 		const input = inlineOperation("itertools = { workspace = true }\n＋jiff = { workspace = true }");

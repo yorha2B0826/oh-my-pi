@@ -109,7 +109,7 @@ mod platform {
 			)
 		};
 		let mut ranges = Vec::new();
-		for result in results.iter() {
+		for result in &results {
 			let range = result.range();
 			if range.length == 0 || range.location >= NS_NOT_FOUND {
 				continue;

@@ -11,7 +11,6 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 import { TASK_SUBAGENT_LIFECYCLE_CHANNEL } from "@oh-my-pi/pi-coding-agent/task";
 import type { TodoPhase } from "@oh-my-pi/pi-coding-agent/tools/todo";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
-import type { NativeScrollbackLiveRegion } from "@oh-my-pi/pi-tui";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
 function renderTodos(mode: InteractiveMode): string {
@@ -162,17 +161,6 @@ describe("InteractiveMode todo HUD persistence", () => {
 
 		vi.advanceTimersByTime(1);
 		expect(renderTodos(mode)).not.toContain("done task");
-	});
-
-	it("keeps the anchored todo panel in the live region while visible", () => {
-		setTodoClearDelay(-1);
-
-		mode.setTodos([{ name: "Implementation", tasks: [{ content: "pending task", status: "pending" }] }]);
-		const liveRegion = mode.todoContainer as unknown as NativeScrollbackLiveRegion;
-		expect(liveRegion.getNativeScrollbackLiveRegionStart?.()).toBe(0);
-
-		mode.setTodos([]);
-		expect(liveRegion.getNativeScrollbackLiveRegionStart?.()).toBeUndefined();
 	});
 
 	it("marks todos complete when subagent reconciliation reports a finished agent", async () => {
@@ -372,17 +360,5 @@ describe("InteractiveMode todo HUD anchor", () => {
 		// Hidden stages do not change the compact title.
 		const root = lines.find(line => line.includes("TODO"));
 		expect(root?.trim()).toBe("TODO");
-	});
-
-	it("anchors the todo HUD as a native-scrollback live region while populated", () => {
-		// The loader sits below this HUD, so the HUD must report its own seam or
-		// its rows commit to scrollback as stale duplicates on short terminals.
-		const seam = () =>
-			(mode.todoContainer as Partial<NativeScrollbackLiveRegion>).getNativeScrollbackLiveRegionStart?.();
-		expect(seam()).toBeUndefined();
-		mode.setTodos([{ name: "Tasks", tasks: [{ content: "alpha", status: "pending" }] }]);
-		expect(seam()).toBe(0);
-		mode.setTodos([]);
-		expect(seam()).toBeUndefined();
 	});
 });
