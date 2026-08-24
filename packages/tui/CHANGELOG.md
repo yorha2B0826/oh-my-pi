@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Renamed TerminalFrameProvider.resetHistory to beginHistoryReplay
+
+### Fixed
+
+- Fixed graceful terminal shutdown leaving eligible finalized output in the mutable viewport instead of retiring it before shell handoff.
+
+## [18.0.4] - 2026-08-24
+
+### Changed
+
+- Significantly improved streaming Markdown rendering performance by caching unchanged rows, resuming boundary walks, and inspecting only text deltas for guard scans and OSC 8 normalization.
+
+### Fixed
+
+- Fixed TUI aborting when syntax highlighting fails during Markdown rendering by falling back to unhighlighted text.
+- Fixed Korean IME cursor drift in Orca by properly matching two-cell Hangul Compatibility Jamo rendering.
+
 ## [18.0.3] - 2026-08-23
 
 ### Fixed

@@ -117,6 +117,33 @@ describe("TranscriptContainer", () => {
 		// settled transcript prefix live for one frame while it drains next.
 		expect(transcript.renderViewport(80, 1, frame)).toEqual(["current tool"]);
 	});
+	it("excludes empty blocks so pressure never emits blank rows (issue 9483)", () => {
+		const transcript = new TranscriptContainer();
+		// Text blocks interleaved with empty (hidden tool-activity) blocks that
+		// render nothing but stay live until retired.
+		for (let i = 0; i < 6; i++) {
+			transcript.addChild(new Block([`t${i}a`, `t${i}b`, `t${i}c`], true));
+			for (let j = 0; j < 8; j++) transcript.addChild(new Block([], true));
+		}
+		// Emergency path: more non-empty blocks than rows. Every row carries real
+		// text — no block's tail is dropped as blank padding.
+		const out = transcript.renderViewport(80, 12, frame);
+		expect(out).toHaveLength(12);
+		expect(out.every(row => /\S/.test(row))).toBe(true);
+	});
+
+	it("empty blocks do not reserve capacity from real text under pressure (issue 9483)", () => {
+		const transcript = new TranscriptContainer();
+		transcript.addChild(new Block(["A1", "A2", "A3", "A4"], true));
+		transcript.addChild(new Block([], true));
+		transcript.addChild(new Block(["B1", "B2", "B3", "B4"], true));
+		transcript.addChild(new Block([], true));
+		transcript.addChild(new Block(["C1", "C2", "C3", "C4"], true));
+		// Capacity 10 fits all real content once the two empty blocks stop
+		// stealing a base row each; the older block keeps its tail rows.
+		const out = transcript.renderViewport(80, 10, frame);
+		expect(out).toEqual(["A3", "A4", "B1", "B2", "B3", "B4", "C1", "C2", "C3", "C4"]);
+	});
 
 	it("permits removing settled blocks until they are offered or committed", () => {
 		const transcript = new TranscriptContainer();
@@ -141,18 +168,41 @@ describe("TranscriptContainer", () => {
 		expect(transcript.blockStates()).toEqual(["committed", "active"]);
 	});
 
-	it("reoffers committed history after an explicit destructive reset", () => {
+	it("replays committed history without rewinding lifecycle state", () => {
 		const transcript = new TranscriptContainer();
 		transcript.addChild(new Block(["final"], true));
 		const first = transcript.peekFinalizedBatch(80, 0);
 		if (first === undefined) throw new Error("expected initial batch");
 		transcript.acknowledgeFinalizedBatch(first.id);
+		expect(transcript.blockStates()).toEqual(["committed"]);
 
-		transcript.resetRetirement();
-		// Fits again after the reset: stays live until pressure returns.
-		expect(transcript.renderViewport(80, 10, frame)).toEqual(["final"]);
-		const replay = transcript.peekFinalizedBatch(80, 0);
+		transcript.beginReplay();
+		expect(transcript.renderViewport(80, 10, frame)).toEqual([]);
+		const replay = transcript.peekFinalizedBatch(80, 10);
 		expect(replay?.id).toBeGreaterThan(first.id);
 		expect(replay?.rows).toEqual(["final", ""]);
+		transcript.acknowledgeFinalizedBatch(replay!.id);
+		expect(transcript.blockStates()).toEqual(["committed"]);
+		expect(transcript.peekFinalizedBatch(80, 0)).toBeUndefined();
+	});
+
+	it("flushes a finalized prefix without viewport pressure", () => {
+		const transcript = new TranscriptContainer();
+		transcript.addChild(new Block(["fits"], true));
+
+		expect(transcript.peekFinalizedBatch(80, 10)).toBeUndefined();
+		expect(transcript.peekFlushBatch(80)?.rows).toEqual(["fits", ""]);
+	});
+
+	it("keeps the live viewport while an independent replay is offered", () => {
+		const transcript = new TranscriptContainer();
+		transcript.addChild(new Block(["committed"], true));
+		const committed = transcript.peekFinalizedBatch(80, 0)!;
+		transcript.acknowledgeFinalizedBatch(committed.id);
+		transcript.addChild(new Block(["active"], false));
+
+		transcript.beginReplay();
+		expect(transcript.peekFinalizedBatch(80, 10)?.rows).toEqual(["committed", ""]);
+		expect(transcript.renderViewport(80, 10, frame)).toEqual(["active"]);
 	});
 });
