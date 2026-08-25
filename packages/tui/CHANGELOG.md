@@ -2,18 +2,25 @@
 
 ## [Unreleased]
 
+## [18.0.5] - 2026-08-25
+
 ### Breaking Changes
 
-- Renamed TerminalFrameProvider.resetHistory to beginHistoryReplay
+- Renamed the public `TerminalFrameProvider.resetHistory` method to `beginHistoryReplay`.
+
+### Added
+
+- Loader messages can now be provided as a function, allowing dynamic labels such as live countdowns to update on each spinner tick while preserving the existing behavior for static strings.
 
 ### Changed
 
-- History replay batches now bottom-split into leading viewport space and serialize the complete replay remainder plus final viewport in one synchronous terminal write.
+- Improved history replay and terminal output handling so replayed content is rendered efficiently and complete replay results are written together.
 
 ### Fixed
 
-- Fixed graceful terminal shutdown leaving eligible finalized output in the mutable viewport instead of retiring it before shell handoff.
-- Fixed a latched destructive scrollback rebuild (settled rebuild-mode resize, display reset) erasing and re-streaming the whole transcript during stop; the latch is dropped and shutdown writes only the un-retired tail.
+- Fixed graceful shutdown so finalized output is correctly retired before handing control back to the shell.
+- Fixed terminal scrollback corruption during shutdown, tmux pane zoom and resize, and destructive screen resets, preventing duplicated frames, lost history, and stale transcript re-streaming.
+- Fixed streaming Markdown rendering at chunk boundaries to preserve CommonMark emphasis behavior for Unicode text and correctly recognize GFM tables as they are completed.
 
 ## [18.0.4] - 2026-08-24
 

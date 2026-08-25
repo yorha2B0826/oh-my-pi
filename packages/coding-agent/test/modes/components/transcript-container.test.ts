@@ -1,8 +1,11 @@
-import { describe, expect, it } from "bun:test";
+import { beforeAll, describe, expect, it } from "bun:test";
+import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import { AssistantMessageComponent } from "@oh-my-pi/pi-coding-agent/modes/components/assistant-message";
 import {
 	TranscriptContainer,
 	type TranscriptStableRow,
 } from "@oh-my-pi/pi-coding-agent/modes/components/transcript-container";
+import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { Component } from "@oh-my-pi/pi-tui";
 
 class Block implements Component {
@@ -31,6 +34,11 @@ class Block implements Component {
 	render(): readonly string[] {
 		return this.#rows;
 	}
+}
+
+/** A live block the container recognizes as dynamic tool-activity. */
+class ToolBlock extends Block {
+	setToolActivityVisible(): void {}
 }
 
 function literalStableRow(row: string): TranscriptStableRow {
@@ -95,6 +103,26 @@ class ReflowingAppendBlock implements Component {
 		return [...this.renderTranscriptStableRows(1, width), this.#finalized ? "final" : "partial"];
 	}
 }
+const finalAnswer: AssistantMessage = {
+	role: "assistant",
+	content: [
+		{ type: "thinking", thinking: "Reasoning first" },
+		{ type: "text", text: "## Implemented" },
+	],
+	api: "openai-codex-responses",
+	provider: "openai-codex",
+	model: "gpt-5.6-sol",
+	stopReason: "stop",
+	usage: {
+		input: 0,
+		output: 0,
+		cacheRead: 0,
+		cacheWrite: 0,
+		totalTokens: 0,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+	},
+	timestamp: 1,
+};
 
 const frame = { tick: 0, now: 0 };
 
@@ -195,6 +223,10 @@ describe("TranscriptContainer", () => {
 		block.finalize();
 		const suffix = transcript.peekFinalizedBatch(8, 0)!;
 		expect(suffix.rows).toEqual(["final", ""]);
+	});
+
+	beforeAll(async () => {
+		await initTheme(false);
 	});
 
 	it("keeps settled blocks live while the viewport has room", () => {
@@ -307,6 +339,35 @@ describe("TranscriptContainer", () => {
 		// stealing a base row each; the older block keeps its tail rows.
 		const out = transcript.renderViewport(80, 10, frame);
 		expect(out).toEqual(["A3", "A4", "B1", "B2", "B3", "B4", "C1", "C2", "C3", "C4"]);
+	});
+
+	it("keeps a completed assistant answer visible behind an active prefix", () => {
+		const transcript = new TranscriptContainer();
+		transcript.addChild(new Block(["stale active"], false));
+		transcript.addChild(new AssistantMessageComponent(finalAnswer));
+		transcript.addChild(new Block(["continued turn"], false));
+		transcript.addChild(new Block(["task running"], false));
+
+		expect(transcript.peekFinalizedBatch(80, 3)).toBeUndefined();
+		const rows = transcript.renderViewport(80, 3, frame);
+		expect(rows[0]).toBe("2 more transcript blocks active");
+		expect(Bun.stripANSI(rows[1] ?? "").trim()).toBe("Implemented");
+		expect(rows[2]).toBe("task running");
+	});
+
+	it("gives surplus rows to assistant text before a growing tool card (issue 9718)", () => {
+		const transcript = new TranscriptContainer();
+		const assistant = new Block(["A1", "A2", "A3", "A4"], false);
+		const tool = new ToolBlock(["T1", "T2", "T3", "T4"], false);
+		transcript.addChild(assistant);
+		transcript.addChild(tool);
+		// Capacity 5 cannot fit both blocks in full. Surplus (3 rows) goes to the
+		// assistant block first; the tool card collapses to its one-row minimum
+		// instead of clipping already-visible assistant text.
+		const out = transcript.renderViewport(80, 5, frame);
+		expect(out).toEqual(["A1", "A2", "A3", "A4", "T4"]);
+		expect(assistant.allocations.at(-1)).toBe(4);
+		expect(tool.allocations.at(-1)).toBe(1);
 	});
 
 	it("permits removing settled blocks until they are offered or committed", () => {
