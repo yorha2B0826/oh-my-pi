@@ -23,10 +23,14 @@ import {
 	withTimeoutSignal,
 } from "../utils/fetch-timeout";
 
-const REPO = "can1357/oh-my-pi";
-const PACKAGE = "@oh-my-pi/pi-coding-agent";
-const HOMEBREW_FORMULA = "can1357/tap/omp";
-const MISE_TOOL = "github:can1357/oh-my-pi";
+// Fork override: these four constants decide where update checks/installs go.
+// Fork builds set them via env (see fork README) so update checks target the
+// fork's own releases instead of upstream can1357.
+const env = (key: string, fallback: string): string => process.env[key]?.trim() || fallback;
+const REPO = env("OMP_UPDATE_REPO", "can1357/oh-my-pi");
+const PACKAGE = env("OMP_UPDATE_PACKAGE", "@oh-my-pi/pi-coding-agent");
+const HOMEBREW_FORMULA = env("OMP_UPDATE_HOMEBREW", "can1357/tap/omp");
+const MISE_TOOL = env("OMP_UPDATE_MISE", "github:can1357/oh-my-pi");
 const NIX_STORE_DIR = "/nix/store";
 /**
  * Official npm registry origin.
@@ -803,6 +807,25 @@ export async function getLatestRelease(
 ): Promise<ReleaseInfo> {
 	const timeoutMs = options.timeoutMs ?? RELEASE_METADATA_TIMEOUT_MS;
 	const channel = options.channel ?? "stable";
+
+	// Fork mode: when OMP_UPDATE_REPO is overridden, resolve the latest version
+	// from the fork's own GitHub releases (fork does not publish to npm, so the
+	// npm-registry path would always report upstream's newer version).
+	if (process.env.OMP_UPDATE_REPO?.trim()) {
+		const response = await fetch(`${GITHUB_API}/repos/${REPO}/releases/latest`, {
+			signal: withTimeoutSignal(timeoutMs),
+		});
+		if (!response.ok) {
+			throw new Error(`Failed to fetch fork release info: ${response.statusText}`);
+		}
+		const data: unknown = await response.json();
+		if (!isRecord(data) || typeof data.tag_name !== "string") {
+			throw new Error("Malformed GitHub releases response for fork: missing tag_name");
+		}
+		const version = data.tag_name.replace(/^v/, "");
+		return { tag: data.tag_name, version, dist: "binary", packages: { ...CURRENT_PACKAGES } };
+	}
+
 	const packages: ReleasePackages = { ...CURRENT_PACKAGES };
 	const visited = new Set([packages.pkg]);
 	let latest = await fetchLatestManifest(packages.pkg, timeoutMs, channel);
