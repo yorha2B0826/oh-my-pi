@@ -23,14 +23,13 @@ import {
 	withTimeoutSignal,
 } from "../utils/fetch-timeout";
 
-// Fork override: these four constants decide where update checks/installs go.
-// Fork builds set them via env (see fork README) so update checks target the
-// fork's own releases instead of upstream can1357.
-const env = (key: string, fallback: string): string => process.env[key]?.trim() || fallback;
-const REPO = env("OMP_UPDATE_REPO", "can1357/oh-my-pi");
-const PACKAGE = env("OMP_UPDATE_PACKAGE", "@oh-my-pi/pi-coding-agent");
-const HOMEBREW_FORMULA = env("OMP_UPDATE_HOMEBREW", "can1357/tap/omp");
-const MISE_TOOL = env("OMP_UPDATE_MISE", "github:can1357/oh-my-pi");
+// Fork build: update checks/installs target THIS fork's releases, hardcoded so
+// no environment configuration is needed. Upstream merges will conflict here by
+// design — always keep the fork values (yorha2B0826).
+const REPO = "yorha2B0826/oh-my-pi";
+const PACKAGE = "@oh-my-pi/pi-coding-agent";
+const HOMEBREW_FORMULA = "yorha2b0826/omp-ustc/omp";
+const MISE_TOOL = "github:yorha2B0826/oh-my-pi";
 const NIX_STORE_DIR = "/nix/store";
 /**
  * Official npm registry origin.
@@ -808,10 +807,10 @@ export async function getLatestRelease(
 	const timeoutMs = options.timeoutMs ?? RELEASE_METADATA_TIMEOUT_MS;
 	const channel = options.channel ?? "stable";
 
-	// Fork mode: when OMP_UPDATE_REPO is overridden, resolve the latest version
-	// from the fork's own GitHub releases (fork does not publish to npm, so the
-	// npm-registry path would always report upstream's newer version).
-	if (process.env.OMP_UPDATE_REPO?.trim()) {
+	// Fork build: resolve the latest version from this fork's GitHub releases
+	// (the fork does not publish to npm, so the npm-registry path would report
+	// upstream's version instead of the fork's).
+	{
 		const response = await fetch(`${GITHUB_API}/repos/${REPO}/releases/latest`, {
 			signal: withTimeoutSignal(timeoutMs),
 		});
@@ -825,25 +824,6 @@ export async function getLatestRelease(
 		const version = data.tag_name.replace(/^v/, "");
 		return { tag: data.tag_name, version, dist: "binary", packages: { ...CURRENT_PACKAGES } };
 	}
-
-	const packages: ReleasePackages = { ...CURRENT_PACKAGES };
-	const visited = new Set([packages.pkg]);
-	let latest = await fetchLatestManifest(packages.pkg, timeoutMs, channel);
-	for (let hop = 0; hop < MAX_RENAME_HOPS; hop++) {
-		const rename = resolveReleaseRename(latest.manifest);
-		if (!rename || visited.has(rename.pkg)) break;
-		visited.add(rename.pkg);
-		packages.pkg = rename.pkg;
-		if (rename.natives) packages.natives = rename.natives;
-		latest = await fetchLatestManifest(packages.pkg, timeoutMs, channel);
-	}
-
-	return {
-		tag: `v${latest.version}`,
-		version: latest.version,
-		dist: resolveReleaseDist(latest.manifest),
-		packages,
-	};
 }
 
 interface BunInstallCachePruneResult {

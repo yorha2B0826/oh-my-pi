@@ -98,16 +98,8 @@ bun install -g @oh-my-pi/pi-coding-agent
 
 ### 更新检查以 fork 为准
 
-本 fork 的构建内置了更新渠道覆盖:设置环境变量后,`omp update` 与启动时的
-更新提醒会指向 **fork 自己的 release**,而不是上游:
-
-```sh
-export OMP_UPDATE_REPO="yorha2B0826/oh-my-pi"
-# 可选(仅 homebrew/mise 安装方式需要):
-export OMP_UPDATE_HOMEBREW="yorha2b0826/omp-ustc/omp"
-```
-
-未设置时保持上游默认行为。
+本 fork 构建的更新检查(`omp update` 与启动提醒)直接指向 **fork 自己的
+release**,无需任何配置。安装新版本会自动带上 iWAN 定制。
 
 ## 快速上手
 
