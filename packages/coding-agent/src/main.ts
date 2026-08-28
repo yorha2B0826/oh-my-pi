@@ -115,7 +115,7 @@ type RunPrintMode = (session: AgentSession, options: PrintModeOptions) => Promis
 type RunRpcMode = (
 	session: AgentSession,
 	setToolUIContext?: (uiContext: ExtensionUIContext, hasUI: boolean) => void,
-	eventBus?: EventBus,
+	subagentEventBus?: EventBus,
 	input?: ReadableStream<Uint8Array>,
 ) => Promise<never>;
 
@@ -493,6 +493,7 @@ async function runInteractiveMode(
 	forceSetupWizard: boolean,
 	showStartupSplash: boolean,
 	eventBus?: EventBus,
+	subagentEventBus?: EventBus,
 	initialMessage?: string,
 	initialImages?: ImageContent[],
 	joinLink?: string,
@@ -510,6 +511,7 @@ async function runInteractiveMode(
 			mcpManager,
 			eventBus,
 			startupLease?.composer,
+			subagentEventBus,
 		);
 		startupLease?.adopt();
 	} catch (error) {
@@ -1881,6 +1883,7 @@ export async function runRootCommand(
 			}
 
 			const eventBus = new EventBus();
+			const subagentEventBus = new EventBus();
 			const extensionsResult = parsedArgs.trustedExtensions?.length
 				? await loadTrustedSessionExtensions(sessionOptions, cwd, eventBus)
 				: await loadSessionExtensions(sessionOptions, cwd, settingsInstance, eventBus);
@@ -1960,6 +1963,7 @@ export async function runRootCommand(
 			} = await createSession({
 				...sessionOptions,
 				eventBus,
+				subagentEventBus,
 				preloadedExtensions: extensionsResult,
 			});
 
@@ -1985,6 +1989,7 @@ export async function runRootCommand(
 					settings: settingsInstance,
 					enableLsp: sessionOptions.enableLsp ?? true,
 					eventBus,
+					subagentEventBus,
 				}),
 				Math.trunc(Number(settingsInstance.get("task.agentIdleTtlMs") ?? 420_000) || 0),
 			);
@@ -2033,7 +2038,7 @@ export async function runRootCommand(
 				// Branch-only protocol runner: keep RPC host code out of normal interactive startup.
 				const runRpcMode: RunRpcMode = (await import("./modes/rpc/rpc-mode")).runRpcMode;
 				stopStartupWatchdog();
-				await runRpcMode(session, mode === "rpc-ui" ? setToolUIContext : undefined, eventBus, rpcInput);
+				await runRpcMode(session, mode === "rpc-ui" ? setToolUIContext : undefined, subagentEventBus, rpcInput);
 			} else if (isInteractive) {
 				const versionCheckPromise = checkForNewVersion(VERSION).catch(() => undefined);
 				const startupChangelog = await startupChangelogPromise;
@@ -2073,6 +2078,7 @@ export async function runRootCommand(
 						deps.forceSetupWizard === true,
 						showStartupSplash,
 						eventBus,
+						subagentEventBus,
 						initialMessage,
 						initialImages,
 						parsedArgs.join,
