@@ -1894,6 +1894,19 @@ export function isUstcReasoningModelId(id: string): boolean {
 }
 
 /**
+ * USTC's `/v1/models` response carries only ids — no per-model input modality —
+ * so the discovered models default to text-only. GLM 5.3 flash is multimodal
+ * (verified live 2026-08-31 against api.llm.ustc.edu.cn: image + text prompt
+ * returned a correct description); force image input for it so the picker and
+ * image-attach paths treat it as vision-capable even when the gateway's model
+ * list omits the modality field.
+ */
+export function isUstcMultimodalModelId(id: string): boolean {
+	const normalized = id.toLowerCase();
+	return normalized === "glm-5.3-flash" || normalized === "glm-5.3";
+}
+
+/**
  * USTC's `/v1/models` carries only ids — no `limit.context` — so the discovered
  * models have no context window (status bar shows "<tokens>/?"). The gateway's
  * per-model context windows are advertised in its model picker UI; mirror those
@@ -1909,6 +1922,7 @@ const USTC_MODEL_CONTEXT_WINDOWS: Record<string, number> = {
 	// GLM (高阶推理层)
 	"glm-5.2-107": 1_000_000,
 	"glm-5.2": 1_000_000,
+	"glm-5.3-flash": 1_000_000,
 	// Kimi (高阶推理层)
 	k3: 600_000,
 	// Qwen (高效通用层 / 能力增强层)
@@ -1973,6 +1987,13 @@ export function ustcModelManagerOptions(config?: UstcModelManagerConfig): ModelM
 						// so restore each model's advertised context window by id
 						// (see USTC_MODEL_CONTEXT_WINDOWS) instead of showing "?".
 						contextWindow: model.contextWindow ?? ustcModelContextWindow(model.id),
+						// USTC's `/v1/models` carries no modality field; force
+						// image input for models known to be multimodal (glm-5.3-flash
+						// verified live) so image-attach works regardless of what the
+						// gateway advertises.
+						input: isUstcMultimodalModelId(model.id)
+							? ([...new Set([...(model.input ?? []), "text", "image"])] as Array<"text" | "image">)
+							: model.input,
 					}),
 				}),
 		}),
