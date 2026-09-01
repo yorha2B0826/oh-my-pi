@@ -104,6 +104,12 @@ export interface RenderSessionContextOptions {
 	preservedLiveToolCallIds?: ReadonlySet<string>;
 }
 
+export interface AgentHubOpenOptions {
+	requireContent?: boolean;
+	armCloseTap?: boolean;
+	initialSection?: "agents" | "activity";
+}
+
 export interface InteractiveModeContext {
 	// UI access
 	ui: TUI;
@@ -377,6 +383,7 @@ export interface InteractiveModeContext {
 
 	// Command handling
 	handleExportCommand(text: string): Promise<void>;
+	handleTraceCommand(): Promise<void>;
 	handleShareCommand(): Promise<void>;
 	handleTodoCommand(args: string): Promise<void>;
 	handleSessionCommand(): Promise<void>;
@@ -445,7 +452,10 @@ export interface InteractiveModeContext {
 	showHookConfirm(title: string, message: string): Promise<boolean>;
 	showDebugSelector(): Promise<void>;
 	showIwanServerSelector(): Promise<number | undefined>;
-	showAgentHub(options?: { requireContent?: boolean; armCloseTap?: boolean }): void;
+	showAgentHub(options?: AgentHubOpenOptions): void;
+	/** Open the fullscreen `/usage` dashboard overlay for the given reports. */
+	showUsageDashboard(reports: UsageReport[]): void;
+	showAdvisorConfigure(): void;
 	resetObserverRegistry(): void;
 
 	// Input handling
