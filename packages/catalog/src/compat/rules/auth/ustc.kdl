@@ -1,0 +1,9 @@
+auth "ustc" {
+	name "USTC"
+	login "api-key" {
+		auth-url "https://api.llm.ustc.edu.cn"
+		instructions "Create or copy your API key from the USTC LLM gateway console"
+		prompt "Paste your USTC API key" placeholder="sk-..."
+		validate "models-endpoint" label="ustc" url="https://api.llm.ustc.edu.cn/v1/models"
+	}
+}

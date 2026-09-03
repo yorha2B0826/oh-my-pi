@@ -67,6 +67,7 @@
 		"auth/tavily.kdl",
 		"auth/together.kdl",
 		"auth/umans.kdl",
+		"auth/ustc.kdl",
 		"auth/venice.kdl",
 		"auth/vercel-ai-gateway.kdl",
 		"auth/vllm.kdl",
@@ -16284,6 +16285,23 @@
 						"kind": "models-endpoint",
 						"label": "deepseek",
 						"url": "https://api.deepseek.com/v1/models"
+					}
+				}
+			},
+			{
+				"id": "ustc",
+				"apiKeyFormat": "bearer",
+				"name": "USTC",
+				"login": {
+					"kind": "api-key",
+					"authUrl": "https://api.llm.ustc.edu.cn",
+					"instructions": "Create or copy your API key from the USTC LLM gateway console",
+					"prompt": "Paste your USTC API key",
+					"placeholder": "sk-...",
+					"validate": {
+						"kind": "models-endpoint",
+						"label": "ustc",
+						"url": "https://api.llm.ustc.edu.cn/v1/models"
 					}
 				}
 			},

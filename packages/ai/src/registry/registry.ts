@@ -6,6 +6,8 @@ import { bedrockMantleTransport } from "./bedrock-mantle";
 import { buildProviderDefinition, type ProviderTransport } from "./build";
 import { cloudflareAiGatewayTransport } from "./cloudflare-ai-gateway";
 import type { ProviderDefinition } from "./types";
+// ── Fork customization: USTC /login validation travels the iWAN tunnel ──
+import { routeFetch as routeIwanFetch } from "../iwan/route";
 
 /**
  * TypeScript-side request/model shaping for providers whose transport needs
@@ -26,9 +28,22 @@ const TRANSPORTS: Record<string, ProviderTransport> = {
  * env map, login list, refresh/login dispatch, CLI callback maps) derives
  * from this registry.
  */
-export const PROVIDER_REGISTRY: readonly ProviderDefinition[] = authProviders().map(policy =>
-	buildProviderDefinition(policy, TRANSPORTS[policy.id]),
-);
+
+// ── Fork customization: USTC login validation through the iWAN tunnel ────────
+// USTC's gateway (api.llm.ustc.edu.cn) is campus-only: the /login API-key
+// validation request must go through the iWAN SOCKS5 tunnel. The declarative
+// KDL api-key flow validates against the models endpoint using
+// `callbacks.fetch`; we wrap USTC's login so the tunneled fetch (routeFetch)
+// is injected. No tunnel up → routeFetch falls back to plain fetch (safe).
+// Upstream merges may move this; keep the wrap for provider id "ustc".
+function ustcTunneledLogin(login: NonNullable<ProviderDefinition["login"]>): NonNullable<ProviderDefinition["login"]> {
+	return async callbacks => login({ ...callbacks, fetch: routeIwanFetch(callbacks.fetch ?? fetch) });
+}
+
+export const PROVIDER_REGISTRY: readonly ProviderDefinition[] = authProviders().map(policy => {
+	const def = buildProviderDefinition(policy, TRANSPORTS[policy.id]);
+	return policy.id === "ustc" && def.login ? { ...def, login: ustcTunneledLogin(def.login) } : def;
+});
 
 const BY_ID: Record<string, ProviderDefinition> = Object.fromEntries(PROVIDER_REGISTRY.map(p => [p.id, p]));
 
