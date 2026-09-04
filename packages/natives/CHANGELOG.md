@@ -2,9 +2,16 @@
 
 ## [Unreleased]
 
+## [18.1.9] - 2026-09-04
+
+### Added
+
+- Added native Sixel-to-PNG decoding for terminal graphics returned by shell commands.
+- Added transactional native OAuth callback registration with one-shot callback delivery on macOS, Linux desktops, and Windows.
+
 ### Fixed
 
-- Fixed native VCS clean to resolve nested `.gitignore` files, global `core.excludesFile`, and `.git/info/exclude`, safely unlink directory symlinks without modifying target trees, respect pathspec boundaries when pruning empty directories, and skip nested repositories and submodules ([#10714](https://github.com/can1357/oh-my-pi/pull/10714) by [@korri123](https://github.com/korri123)).
+- Fixed native version-control cleanup to respect ignore rules and path boundaries while safely handling symlinks, nested repositories, and submodules.
 
 ## [18.1.7] - 2026-09-03
 
