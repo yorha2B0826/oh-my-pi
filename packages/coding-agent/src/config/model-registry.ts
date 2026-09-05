@@ -18,6 +18,7 @@ import type {
 import type { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { collapseBuiltVariants } from "@oh-my-pi/pi-catalog/compat/collapse";
+import { resolveMaxContextWindow } from "@oh-my-pi/pi-catalog/compat/context-window";
 import { applyCatalogMetrics, CatalogMetricsIndex } from "@oh-my-pi/pi-catalog/identity/metrics";
 import { readModelCache, writeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
 import {
@@ -2137,6 +2138,15 @@ export class ModelRegistry {
 			// of leaving the effort selector hidden until the 24-hour cache expires.
 			if (model.provider === "ustc" && !model.reasoning && isUstcReasoningModelId(model.id)) {
 				model = applyModelOverride(model, { reasoning: true });
+			}
+			// Extended context on: lift the runtime window to the advertised
+			// maximum (live discovery > rule-owned fallback), so extended
+			// context never compacts below the deployment's real wire maximum.
+			if (extendedContext) {
+				const maximum = resolveMaxContextWindow(model);
+				if (maximum !== undefined && model.contextWindow !== null && maximum > model.contextWindow) {
+					model = applyModelOverride(model, { contextWindow: maximum });
+				}
 			}
 			// Extended context off: cap models with a premium long-context price
 			// tier (e.g. GPT-5.6 bills 2x input above 272K) at the standard-pricing
