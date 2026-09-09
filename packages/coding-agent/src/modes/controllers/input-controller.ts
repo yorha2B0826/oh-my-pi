@@ -187,8 +187,8 @@ export class InputController {
 	) {}
 
 	/** Session-level title starts (user `/skill:` via promptCustomMessage) reuse this UI. */
-	notifyTitleGenerationStart(): void {
-		this.#showTinyTitleDownloadProgress(this.ctx.settings.get("providers.tinyModel"));
+	notifyTitleGenerationStart(): (() => void) | undefined {
+		return this.#showTinyTitleDownloadProgress(this.ctx.settings.get("providers.tinyModel"));
 	}
 
 	#enhancedPaste?: EnhancedPasteController;
@@ -215,7 +215,7 @@ export class InputController {
 	// scoped-input render fast path so the attachment chips band repaints.
 	#lastChipsSignature = "";
 
-	#showTinyTitleDownloadProgress(modelKey: string): void {
+	#showTinyTitleDownloadProgress(modelKey: string): (() => void) | undefined {
 		if (!isTinyTitleLocalModelKey(modelKey)) return;
 		const component = new TinyTitleDownloadProgressComponent(modelKey);
 		let added = false;
@@ -258,6 +258,7 @@ export class InputController {
 			}
 		};
 		const unsubscribe = tinyTitleClient.onProgress(update);
+		return remove;
 	}
 
 	#abortStreamingTurn(): void {
@@ -1107,9 +1108,9 @@ export class InputController {
 		if (this.#isLocalExtensionCommand(text)) {
 			return;
 		}
-		this.ctx.session.maybeStartTitleGeneration(text, () => {
-			this.#showTinyTitleDownloadProgress(this.ctx.settings.get("providers.tinyModel"));
-		});
+		this.ctx.session.maybeStartTitleGeneration(text, () =>
+			this.#showTinyTitleDownloadProgress(this.ctx.settings.get("providers.tinyModel")),
+		);
 	}
 
 	/** Submit editor text to the focused subagent session (chat-only focus policy). */
