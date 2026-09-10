@@ -166,6 +166,10 @@ export const CATALOG_PROVIDERS = [
 		allowUnauthenticated: true,
 		dynamicModelsAuthoritative: true,
 		catalogDiscovery: { label: "Command Code", allowUnauthenticated: true },
+		// The Provider API rows carry no reasoning/modality metadata and KDL
+		// owns the deployment policy: same-id references on other hosts must
+		// not backfill reasoning, input, or limits during generation.
+		skipCrossProviderReferenceFills: true,
 	},
 	{
 		id: "cursor",
@@ -629,6 +633,7 @@ export const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = CATALOG_ENTRY
 			createModelManagerOptions: provider.createModelManagerOptions,
 			allowUnauthenticated: provider.allowUnauthenticated,
 			dynamicModelsAuthoritative: provider.dynamicModelsAuthoritative,
+			skipCrossProviderReferenceFills: provider.skipCrossProviderReferenceFills,
 			catalogDiscovery: provider.catalogDiscovery
 				? { ...provider.catalogDiscovery, envVars: provider.catalogDiscovery.envVars ?? provider.envVars ?? [] }
 				: undefined,
