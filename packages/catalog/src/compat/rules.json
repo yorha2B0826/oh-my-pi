@@ -9544,7 +9544,112 @@
 				}
 			},
 			{
-				"source": "providers/deepseek.kdl:14",
+				"source": "providers/deepseek.kdl:18",
+				"providers": [
+					"deepseek"
+				],
+				"models": [
+					{
+						"kind": "exact",
+						"value": "deepseek-flash"
+					},
+					{
+						"kind": "exact",
+						"value": "deepseek-v4-flash"
+					},
+					{
+						"kind": "exact",
+						"value": "deepseek-v4-flash-vision-exp"
+					}
+				],
+				"catalog": {
+					"timeBased": {
+						"offPeakMultiplier": 0.5,
+						"peakWindows": {
+							"morning": {
+								"weekdays": "1,2,3,4,5",
+								"startMinute": 60,
+								"endMinute": 240
+							},
+							"afternoon": {
+								"weekdays": "1,2,3,4,5",
+								"startMinute": 360,
+								"endMinute": 600
+							}
+						}
+					},
+					"costPatch": {
+						"input": 0.3,
+						"output": 1.2,
+						"cacheRead": 0.006,
+						"cacheWrite": 0
+					}
+				}
+			},
+			{
+				"source": "providers/deepseek.kdl:44",
+				"providers": [
+					"deepseek"
+				],
+				"models": [
+					{
+						"kind": "exact",
+						"value": "deepseek-flash"
+					}
+				],
+				"catalog": {
+					"limitsPatch": {
+						"contextWindow": 1000000,
+						"maxTokens": 384000
+					}
+				}
+			},
+			{
+				"source": "providers/deepseek.kdl:51",
+				"providers": [
+					"deepseek"
+				],
+				"models": [
+					{
+						"kind": "exact",
+						"value": "deepseek-v4-pro"
+					}
+				],
+				"catalog": {
+					"costPatch": {
+						"input": 1.32,
+						"output": 3.96,
+						"cacheRead": 0.044,
+						"cacheWrite": 0
+					},
+					"timeBased": {
+						"offPeakMultiplier": 0.5,
+						"peakWindows": {
+							"morning": {
+								"weekdays": "1,2,3,4,5",
+								"startMinute": 60,
+								"endMinute": 240
+							},
+							"afternoon": {
+								"weekdays": "1,2,3,4,5",
+								"startMinute": 360,
+								"endMinute": 600
+							}
+						},
+						"effectiveRates": {
+							"flashPricing": {
+								"effectiveFrom": "2026-09-14T04:00:00Z",
+								"input": 0.3,
+								"output": 1.2,
+								"cacheRead": 0.006,
+								"cacheWrite": 0
+							}
+						}
+					}
+				}
+			},
+			{
+				"source": "providers/deepseek.kdl:84",
 				"providers": [
 					"deepseek"
 				],
@@ -9552,6 +9657,10 @@
 					{
 						"kind": "exact",
 						"value": "deepseek-v4-flash"
+					},
+					{
+						"kind": "exact",
+						"value": "deepseek-v4.1-flash-expires-on-0910"
 					}
 				],
 				"wire": {

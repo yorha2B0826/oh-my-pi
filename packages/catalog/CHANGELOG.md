@@ -4,6 +4,9 @@
 
 ### Added
 
+- Added DeepSeek cost estimates that follow published peak/off-peak rates.
+- Added dated, announced price changes to the catalog, so rates switch on their effective date (e.g. DeepSeek Pro moving to Flash rates).
+
 - Added Command Code as a built-in provider with API-key login, live model discovery, per-model pricing, native OpenAI/Anthropic-compatible routing, cache-aware token usage, and TTFT metrics ([#11391](https://github.com/can1357/oh-my-pi/pull/11391) by [@CherkaSSH](https://github.com/CherkaSSH)).
 ## [18.1.16] - 2026-09-09
 
