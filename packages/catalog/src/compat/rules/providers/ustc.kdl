@@ -1,0 +1,16 @@
+// Provider-wire compat for "ustc" — the fork's campus LiteLLM gateway
+// (api.llm.ustc.edu.cn). The gateway fronts USTC-hosted deployments whose
+// capabilities follow the deployment rather than the upstream vendor API, so the
+// lineage classes need per-id corrections.
+//
+// `deepseek-flash` is the one id where that bites: classes/deepseek.kdl strips
+// image input across the whole DeepSeek lineage (the public DeepSeek API is
+// text-only), but this deployment accepts image parts — verified live
+// 2026-09-11 with a two-colour probe (a red and a blue swatch, both answered
+// correctly). The deepseek-v4-* lane on the same gateway rejects images with
+// HTTP 400, so the class default stays right for those ids.
+provider "ustc" {
+	models "deepseek-flash" {
+		strip-image-input #false
+	}
+}

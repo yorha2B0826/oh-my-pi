@@ -1889,33 +1889,102 @@ export interface UstcModelManagerConfig {
 	fetch?: FetchImpl;
 }
 
-const USTC_REASONING_MODEL_ID_PATTERN = /(?:^|[-/])(?:reasoner|reasoning)(?:$|[-/])/i;
+const USTC_REASONING_MODEL_ID_PATTERN = /(?:^|[-/])(?:reasoner|reasoning|thinking)(?:$|[-/])/i;
 
-/** USTC's `/models` response only carries ids, so restore its documented reasoning capability. */
+/**
+ * Ids that opt OUT of thinking. `qwen3.5-non-thinking` shares the qwen3.5 family
+ * but never emits `reasoning_content`, so the `thinking` segment added to
+ * `USTC_REASONING_MODEL_ID_PATTERN` must not catch it.
+ */
+const USTC_NON_THINKING_MODEL_ID_PATTERN = /(?:^|[-/])non[-_]?thinking(?:$|[-/])/i;
+
+/**
+ * USTC's `/models` response only carries ids, so restore its documented
+ * reasoning capability.
+ *
+ * Probed live 2026-09-11 against api.llm.ustc.edu.cn (`reasoning_effort: "high"`
+ * and `thinking: { type: "enabled" }`): every id below answered 200 with a
+ * non-empty `reasoning_content`. `deepseek-flash` is the fast DeepSeek V4.1
+ * lane that thinks on demand, and `qwen3.7-plus` is the one thinking model whose
+ * id carries no marker at all (the platform labels it 思考模式). `claude-*`
+ * thinks only through Anthropic's `thinking` field, which the OpenAI-compatible
+ * effort selector cannot send — it stays flagged non-reasoning on purpose.
+ */
 export function isUstcReasoningModelId(id: string): boolean {
 	const normalized = id.toLowerCase();
-	return normalized.startsWith("deepseek-v4-") || USTC_REASONING_MODEL_ID_PATTERN.test(normalized);
+	if (USTC_NON_THINKING_MODEL_ID_PATTERN.test(normalized)) return false;
+	return (
+		normalized.startsWith("deepseek-v4-") ||
+		normalized === "deepseek-flash" ||
+		normalized === "qwen3.7-plus" ||
+		USTC_REASONING_MODEL_ID_PATTERN.test(normalized)
+	);
 }
 
 /**
  * USTC's `/v1/models` response carries only ids — no per-model input modality —
- * so the discovered models default to text-only. GLM 5.3 flash is multimodal
- * (verified live 2026-08-31 against api.llm.ustc.edu.cn: image + text prompt
- * returned a correct description); force image input for it so the picker and
- * image-attach paths treat it as vision-capable even when the gateway's model
- * list omits the modality field.
+ * so the discovered models default to text-only.
+ *
+ * Two-colour probe (a red and a blue swatch, both answers had to come back
+ * correct) plus a two-half control, run live against api.llm.ustc.edu.cn on
+ * 2026-09-11. Vision: glm-5.3-flash (also verified 2026-08-31),
+ * claude-haiku-4-5(-20251001), deepseek-flash, the qwen chat/reasoning line
+ * (qwen-chat, qwen-reasoner, qwen3.5, qwen3.5-non-thinking, qwen3.5-thinking,
+ * qwen3.6-chat, qwen3.6-reasoner, qwen3.8-chat, qwen3.8-reasoner),
+ * smart/reasoning and unlimited-ocr (reads image layout).
+ *
+ * Hard text-only: the deepseek-v4-* lane — the upstream rejects image parts with
+ * an explicit "Received multimodal data but multi-modal is not supported".
+ *
+ * Held back despite answering HTTP 200 — but never read a lone 400 as a capability
+ * (those sightings were gateway flakiness, re-tested 200), and never read an
+ * `omp -p @image` run as vision evidence either: omp hands text-only models an
+ * image placeholder, and the agent then answers correctly by reading the file off
+ * disk with tools. Raw gateway probes say `qwen3.7-plus` accepts image parts but
+ * burns its whole output budget inside `reasoning_content` without ever answering
+ * (3/3 at a 6000-token budget; 1/1 at 16000, where the reasoning degenerates into
+ * "!!!!" with `finish_reason: "length"`), and `smart/default` is a router that
+ * answers colours inconsistently — the campus catalog lists it `unhealthy` (503),
+ * together with glm-5.3-flash and deepseek-v4-pro.
+ *
+ * Vision-role note (2026-09-11): omp describes images for text-only models through
+ * `read ?q=`, which sends a `system` brief. Replaying that exact request against the
+ * campus gateway, images ground correctly with no brief (and with the same brief
+ * moved into the user turn), but with the full brief in `system` `deepseek-flash`
+ * reports a blank white image and invents "uniform, evenly lit" evidence for a solid
+ * green swatch. `claude-haiku-4-5` and `smart/reasoning` stay correct there; the qwen
+ * chat line and `unlimited-ocr` time out. Keep `modelRoles.vision` off `deepseek-flash`.
  */
+const USTC_TEXT_ONLY_MODEL_IDS = new Set(["qwen3.7-plus", "smart/default"]);
+
 export function isUstcMultimodalModelId(id: string): boolean {
 	const normalized = id.toLowerCase();
-	return normalized === "glm-5.3-flash" || normalized === "glm-5.3";
+	if (USTC_TEXT_ONLY_MODEL_IDS.has(normalized)) return false;
+	// Only the fast DeepSeek lane takes images; deepseek-v4-* rejects them.
+	if (normalized.startsWith("deepseek-")) return normalized === "deepseek-flash";
+	return (
+		normalized.startsWith("claude-") ||
+		normalized.startsWith("qwen") ||
+		normalized === "glm-5.3-flash" ||
+		normalized === "glm-5.3" ||
+		normalized === "smart/reasoning" ||
+		normalized === "unlimited-ocr"
+	);
 }
 
 /**
  * USTC's `/v1/models` carries only ids — no `limit.context` — so the discovered
- * models have no context window (status bar shows "<tokens>/?"). The gateway's
- * per-model context windows are advertised in its model picker UI; mirror those
- * here by id, and fall back to a conservative family default for unknown ids
- * rather than assuming 1M everywhere.
+ * models have no context window (status bar shows "<tokens>/?").
+ *
+ * Values below are the platform's own published numbers where they exist:
+ * `GET https://llm.ustc.edu.cn/api/models/public` is the catalog behind the
+ * gateway's model picker (its `context_window`, verified 2026-09-11:
+ * deepseek-v4-pro 1M, glm-5.3-flash 1M, qwen3.7-plus 262k = "256K",
+ * qwen-chat/qwen3.8-* 262k = "27B-256K"). Ids the platform does not publish
+ * (claude-*, deepseek-flash, qwen3.5/3.6) come from the gateway's
+ * `max_input_tokens` or from live probing with the gateway's own token counter
+ * (`POST /utils/token_counter`; see the notes per entry). Unknown ids fall back
+ * to a conservative family default rather than assuming 1M everywhere.
  */
 const USTC_MODEL_CONTEXT_WINDOWS: Record<string, number> = {
 	// DeepSeek (高阶推理层 / 高效通用层)
@@ -1923,13 +1992,23 @@ const USTC_MODEL_CONTEXT_WINDOWS: Record<string, number> = {
 	"deepseek-v4-flash": 1_000_000,
 	"deepseek-v4-flash-ascend": 1_000_000,
 	"deepseek-v4-flash-ascend1": 700_000,
+	// 快速层，实测 942k prompt tokens 通过 (2026-09-11)，与 V4 家族同档
+	"deepseek-flash": 1_000_000,
+	// Claude (高阶推理层, 2026-09 上线；网关同时下发 max_input_tokens)
+	"claude-haiku-4-5": 200_000,
+	"claude-haiku-4-5-20251001": 200_000,
+	"claude-sonnet-4-6": 1_000_000,
 	// GLM (高阶推理层)
 	"glm-5.2-107": 1_000_000,
 	"glm-5.2": 1_000_000,
 	"glm-5.3-flash": 1_000_000,
-	// Kimi (高阶推理层)
-	k3: 600_000,
 	// Qwen (高效通用层 / 能力增强层)
+	// qwen3.5 家族实测 249k 通过 / 262.9k 被 ContextWindowExceeded 拒绝 → 262 144
+	"qwen3.5": 262_144,
+	"qwen3.5-non-thinking": 262_144,
+	"qwen3.6-chat": 262_144,
+	"qwen3.6-reasoner": 262_144,
+	"qwen3.7-plus": 262_000,
 	"qwen-chat": 262_000,
 	"qwen-reasoner": 262_000,
 	"qwen3.8-chat": 262_144,
@@ -1943,11 +2022,20 @@ const USTC_MODEL_CONTEXT_WINDOWS: Record<string, number> = {
 	"unlimited-ocr": 32_000,
 };
 
-/** Family-level fallbacks keyed by id prefix (matched longest-prefix-first). */
+/**
+ * Family-level fallbacks keyed by id prefix (matched longest-prefix-first).
+ *
+ * Probed live 2026-09-11 with the gateway's own token counter
+ * (`POST /utils/token_counter`): `qwen3.5` accepts 249k prompt tokens and
+ * `claude-haiku-4-5` accepts 238k, so the 256K/200K family labels hold for the
+ * ids the platform does not publish a `context_window` for.
+ */
 const USTC_MODEL_CONTEXT_WINDOW_PREFIXES: Array<[string, number]> = [
 	["deepseek-v4-", 1_000_000],
+	["claude-", 200_000],
 	["glm-", 1_000_000],
 	["qwen3-", 262_144],
+	["qwen3.", 262_144],
 	["qwen-", 262_000],
 	["smart/", 262_000],
 ];
@@ -1961,6 +2049,22 @@ function ustcModelContextWindow(id: string): number {
 	}
 	// Unknown model: err low rather than assume a generous window.
 	return 32_000;
+}
+
+/**
+ * Reads a numeric limit advertised by the gateway on a `/v1/models` entry.
+ *
+ * Most USTC entries carry ids only, but LiteLLM emits
+ * `max_input_tokens` / `max_output_tokens` for modelled deployments (claude-*,
+ * deepseek-v4-pro as of 2026-09-11). Those are the gateway's own numbers, so
+ * they take precedence over the hand-maintained tables below.
+ */
+function ustcAdvertisedLimit(
+	entry: OpenAICompatibleModelRecord,
+	key: "max_input_tokens" | "max_output_tokens",
+): number | undefined {
+	const raw = entry[key];
+	return typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? raw : undefined;
 }
 
 /**
@@ -1984,21 +2088,33 @@ export function ustcModelManagerOptions(config?: UstcModelManagerConfig): ModelM
 					baseUrl,
 					apiKey,
 					fetch: config?.fetch,
-					mapModel: (_entry, model) => ({
-						...model,
-						reasoning: isUstcReasoningModelId(model.id),
-						// USTC's `/v1/models` only carries ids, no `limit.context`,
-						// so restore each model's advertised context window by id
-						// (see USTC_MODEL_CONTEXT_WINDOWS) instead of showing "?".
-						contextWindow: model.contextWindow ?? ustcModelContextWindow(model.id),
-						// USTC's `/v1/models` carries no modality field; force
-						// image input for models known to be multimodal (glm-5.3-flash
-						// verified live) so image-attach works regardless of what the
-						// gateway advertises.
-						input: isUstcMultimodalModelId(model.id)
-							? ([...new Set([...(model.input ?? []), "text", "image"])] as Array<"text" | "image">)
-							: model.input,
-					}),
+					mapModel: (entry, model) => {
+						const advertisedIn = ustcAdvertisedLimit(entry, "max_input_tokens");
+						const advertisedOut = ustcAdvertisedLimit(entry, "max_output_tokens");
+						return {
+							...model,
+							reasoning: isUstcReasoningModelId(model.id),
+							// USTC's `/v1/models` carries no `limit.context` for most ids,
+							// so restore each model's advertised context window by id
+							// (see USTC_MODEL_CONTEXT_WINDOWS) instead of showing "?".
+							// The few ids where the gateway DOES advertise
+							// `max_input_tokens` (claude-*, deepseek-v4-pro) win over the
+							// hand-maintained table.
+							contextWindow: model.contextWindow ?? advertisedIn ?? ustcModelContextWindow(model.id),
+							// Same for the per-response output cap: the gateway advertises
+							// `max_output_tokens` (64000 for claude-*, 8192 for
+							// deepseek-v4-pro); leave it undefined when it does not, so omp
+							// keeps its own ceiling.
+							...(advertisedOut != null && model.maxTokens == null && { maxTokens: advertisedOut }),
+							// USTC's `/v1/models` carries no modality field; force
+							// image input for models verified to be multimodal (see
+							// isUstcMultimodalModelId) so image-attach works regardless of
+							// what the gateway advertises.
+							input: isUstcMultimodalModelId(model.id)
+								? ([...new Set([...(model.input ?? []), "text", "image"])] as Array<"text" | "image">)
+								: model.input,
+						};
+					},
 				}),
 		}),
 	};

@@ -17,6 +17,10 @@ const RUNTIME_ONLY_PROVIDERS = new Set([
 	"synthetic-search",
 	"llama.cpp",
 	"lm-studio",
+	// USTC (fork): dynamic-only campus gateway — `ustcModelManagerOptions`
+	// sets `dynamicModelsAuthoritative: true` and ships no static seed, so
+	// `/v1/models` on api.llm.ustc.edu.cn is the sole source of its rows.
+	"ustc",
 	"vllm",
 	"openai-codex-device",
 ]);

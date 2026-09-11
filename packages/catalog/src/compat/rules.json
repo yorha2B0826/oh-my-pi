@@ -158,6 +158,7 @@
 		"providers/synthetic.kdl",
 		"providers/together.kdl",
 		"providers/umans.kdl",
+		"providers/ustc.kdl",
 		"providers/venice.kdl",
 		"providers/vercel-ai-gateway.kdl",
 		"providers/vllm.kdl",
@@ -14260,6 +14261,21 @@
 				],
 				"wire": {
 					"escapeBuiltinToolNames": true
+				}
+			},
+			{
+				"source": "providers/ustc.kdl:13",
+				"providers": [
+					"ustc"
+				],
+				"models": [
+					{
+						"kind": "exact",
+						"value": "deepseek-flash"
+					}
+				],
+				"wire": {
+					"stripImageInput": false
 				}
 			},
 			{
