@@ -10,6 +10,10 @@
 // correctly). The deepseek-v4-* lane on the same gateway rejects images with
 // HTTP 400, so the class default stays right for those ids.
 provider "ustc" {
+	default-model "qwen3.5"
+	env "USTC_API_KEY"
+	discovery label="USTC"
+
 	models "deepseek-flash" {
 		strip-image-input #false
 	}
