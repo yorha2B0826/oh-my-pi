@@ -6245,11 +6245,11 @@ dependencies = [
 
 [[package]]
 name = "pi-iwan"
-version = "18.1.21"
+version = "18.1.22"
 dependencies = [
  "aes 0.8.4",
  "aes-gcm",
- "base64 0.22.1",
+ "base64 0.23.1",
  "getrandom 0.3.4",
  "hex",
  "hmac",
