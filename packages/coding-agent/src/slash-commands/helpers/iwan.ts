@@ -1,9 +1,9 @@
 import { Spacer, Text, wrapTextWithAnsi } from "@oh-my-pi/pi-tui";
+import { TranscriptBlock } from "@oh-my-pi/pi-tui/chrome/transcript-container";
+import { urlHyperlinkAlways, WidthAwareText } from "@oh-my-pi/pi-tui/render";
+import { theme } from "@oh-my-pi/pi-tui/theme";
 import { openBrowser } from "../../iwan/browser";
 import { type IwanStatus, iwanManager } from "../../iwan/service";
-import { TranscriptBlock } from "../../modes/components/transcript-container";
-import { theme } from "../../modes/theme/theme";
-import { urlHyperlinkAlways, WidthAwareText } from "../../tui";
 import type { ParsedSlashCommand, SlashCommandResult, SlashCommandRuntime, TuiSlashCommandRuntime } from "../types";
 import { commandConsumed, errorMessage, parseSubcommand, usage } from "./parse";
 

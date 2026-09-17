@@ -1,7 +1,7 @@
 import { Container, type SelectItem, SelectList, type SgrMouseEvent, Spacer, TruncatedText } from "@oh-my-pi/pi-tui";
+import { DynamicBorder } from "@oh-my-pi/pi-tui/chrome/dynamic-border";
+import { getSelectListTheme, theme } from "@oh-my-pi/pi-tui/theme";
 import type { IwanStatus } from "../../iwan/service";
-import { getSelectListTheme, theme } from "../../modes/theme/theme";
-import { DynamicBorder } from "./dynamic-border";
 
 const MAX_VISIBLE = 10;
 const LIST_ROW_OFFSET = 4;

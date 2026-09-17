@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from "bun:test";
 import { IwanServerSelectorComponent } from "@oh-my-pi/pi-coding-agent/modes/components/iwan-server-selector";
-import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { initTheme } from "@oh-my-pi/pi-tui/theme";
 
 beforeAll(async () => {
 	await initTheme();
