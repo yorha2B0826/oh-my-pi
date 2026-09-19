@@ -150,7 +150,7 @@ async function loadSessionPicker(): Promise<SessionPicker> {
 				await storage.deleteSessionWithArtifacts(session.path);
 				return true;
 			},
-			loadAllSessions: () => SessionManager.listAll(storage),
+			loadAllSessions: () => SessionManager.listAllForPicker(storage),
 		});
 	};
 }
@@ -1977,8 +1977,8 @@ export async function runRootCommand(
 		// resolved) rejects a native --resume, so the picker must not run first.
 		if (parsedArgs.resume === true && !parsedArgs.fork && !parsedArgs.noSession) {
 			const folderSessions = await logger.time(
-				"SessionManager.list",
-				SessionManager.list,
+				"SessionManager.listForPicker",
+				SessionManager.listForPicker,
 				cwd,
 				parsedArgs.sessionDir,
 			);
@@ -1989,7 +1989,10 @@ export async function runRootCommand(
 				// silently surfaced other projects' history when the cwd was empty
 				// (issue #3099). The preloaded list also makes the user's Tab switch
 				// instant on the way in.
-				preloadedAllSessions = await logger.time("SessionManager.listAll", SessionManager.listAll);
+				preloadedAllSessions = await logger.time(
+					"SessionManager.listAllForPicker",
+					SessionManager.listAllForPicker,
+				);
 				if (preloadedAllSessions.length === 0) {
 					writeStartupNotice(parsedArgs, `${chalk.dim("No sessions found")}\n`);
 					stopStartupWatchdog();
