@@ -10,6 +10,7 @@ import {
 } from "../blob-broker/destinations";
 import { DEFAULT_RELAY_URL } from "../collab/protocol";
 import { DEFAULT_LIVE_VOICE, LIVE_VOICE_OPTIONS, LIVE_VOICE_VALUES } from "../live/voices";
+import { MAGIC_KEYWORDS, type MagicKeywordId } from "../modes/magic-keywords";
 import type { AnyUiMetadata, SettingTab, SubmenuOption, UiBase } from "@oh-my-pi/pi-tui/overlays/settings-defs";
 import {
 	COMPACTION_METHOD_CHOICES,
@@ -98,6 +99,24 @@ export {
 } from "@oh-my-pi/pi-tui/status-line/schema";
 
 interface UiBoolean extends UiBase {}
+
+interface MagicKeywordSettingDef {
+	readonly type: "boolean";
+	readonly default: true;
+	readonly ui: UiBoolean;
+}
+
+/** One `magicKeywords.<id>` toggle per registered keyword, derived so the table stays the only list. */
+const MAGIC_KEYWORD_SETTINGS = Object.fromEntries(
+	MAGIC_KEYWORDS.map((keyword): [string, MagicKeywordSettingDef] => [
+		`magicKeywords.${keyword.id}`,
+		{
+			type: "boolean",
+			default: true,
+			ui: { tab: "interaction", group: "Magic Keywords", label: keyword.label, description: keyword.description },
+		},
+	]),
+) as { readonly [K in MagicKeywordId as `magicKeywords.${K}`]: MagicKeywordSettingDef };
 
 interface UiEnum<T extends readonly string[]> extends UiBase {
 	/** Submenu options. When omitted, the enum renders as an inline toggle derived from `values`. */
@@ -541,7 +560,11 @@ export const SETTINGS_SCHEMA = {
 			description: "Glyph set for icons and symbols (Unicode, Nerd Font, or ASCII)",
 			options: [
 				{ value: "unicode", label: "Unicode", description: "Standard symbols (default)" },
-				{ value: "nerd", label: "Nerd Font", description: "Requires Nerd Font" },
+				{
+					value: "nerd",
+					label: "Nerd Font",
+					description: "Requires a Nerd Font, or a Glyph Protocol terminal (icons ship in-band)",
+				},
 				{ value: "ascii", label: "ASCII", description: "Maximum compatibility" },
 			],
 		},
@@ -2191,42 +2214,10 @@ export const SETTINGS_SCHEMA = {
 			tab: "interaction",
 			group: "Magic Keywords",
 			label: "Magic Keywords",
-			description: "Enable hidden notices for standalone ultrathink, orchestrate, and workflowz keywords",
+			description: `Enable hidden notices for standalone ${MAGIC_KEYWORDS.map(keyword => keyword.word).join(", ")} keywords`,
 		},
 	},
-
-	"magicKeywords.ultrathink": {
-		type: "boolean",
-		default: true,
-		ui: {
-			tab: "interaction",
-			group: "Magic Keywords",
-			label: "Ultrathink Keyword",
-			description: "Let standalone ultrathink request maximum automatic thinking and append its hidden notice",
-		},
-	},
-
-	"magicKeywords.orchestrate": {
-		type: "boolean",
-		default: true,
-		ui: {
-			tab: "interaction",
-			group: "Magic Keywords",
-			label: "Orchestrate Keyword",
-			description: "Let standalone orchestrate append its hidden multi-agent orchestration notice",
-		},
-	},
-
-	"magicKeywords.workflow": {
-		type: "boolean",
-		default: true,
-		ui: {
-			tab: "interaction",
-			group: "Magic Keywords",
-			label: "Workflow Keyword",
-			description: "Let standalone workflowz append its hidden eval workflow notice",
-		},
-	},
+	...MAGIC_KEYWORD_SETTINGS,
 
 	// Notifications
 	"completion.notify": {
@@ -4261,6 +4252,18 @@ export const SETTINGS_SCHEMA = {
 			group: "Available Tools",
 			label: "AST Edit",
 			description: "Enable the ast_edit tool for structural AST rewrites",
+		},
+	},
+
+	"find.enabled": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "tools",
+			group: "Available Tools",
+			label: "Find (semantic grep)",
+			description:
+				"Enable the find tool: natural-language search for files and line ranges, judged by the judge model role",
 		},
 	},
 

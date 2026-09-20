@@ -155,8 +155,9 @@ function createHub(options: {
 const DOWN = "\x1b[B";
 const UP = "\x1b[A";
 const LEFT = "\x1b[D";
-const CTRL_RIGHT = "\x1b[1;5C";
 const ALT_RIGHT = "\x1b[1;3C";
+/** What macOS terminals (ghostty, Terminal.app, iTerm) emit for Option+→. */
+const OPTION_RIGHT_MAC = "\x1bf";
 const ESC = "\x1b";
 
 describe("ModelHub", () => {
@@ -194,12 +195,12 @@ describe("ModelHub", () => {
 			expect(kindIndex).toBeGreaterThan(chatIndex);
 			expect(lines.slice(chatIndex + 1, kindIndex).some(line => line.includes("─"))).toBe(true);
 
-			hub.handleInput(CTRL_RIGHT);
+			hub.handleInput(ALT_RIGHT);
 			lines = hub.render(220).map(line => stripVTControlCharacters(line));
 			expect(lines.some(line => line.includes("DEFAULT"))).toBe(true);
 			expect(lines.some(line => line.includes("IMAGE"))).toBe(false);
 
-			hub.handleInput(CTRL_RIGHT);
+			hub.handleInput(OPTION_RIGHT_MAC);
 			lines = hub.render(220).map(line => stripVTControlCharacters(line));
 			expect(lines.some(line => line.includes("DEFAULT"))).toBe(false);
 			expect(lines.some(line => line.includes("IMAGE"))).toBe(true);
@@ -211,8 +212,8 @@ describe("ModelHub", () => {
 			const { hub } = createHub({ models: [chat, image], scoped: true });
 
 			hub.handleInput(UP);
-			hub.handleInput(CTRL_RIGHT);
-			hub.handleInput(CTRL_RIGHT);
+			hub.handleInput(ALT_RIGHT);
+			hub.handleInput(ALT_RIGHT);
 			hub.handleInput("\n");
 			hub.handleInput("\n");
 
@@ -888,6 +889,37 @@ describe("ModelHub", () => {
 			expect(onAssign).not.toHaveBeenCalled();
 			// Toggle closes the strip without a thinking step.
 			expect(footerLine(hub.render(220))).not.toContain("inherit");
+		});
+
+		test("role strip offers only roles the model can fill", () => {
+			const chat = makeModel("test", "chat-model");
+			const search = makeModel("web", "perplexity", 128_000, undefined, "search");
+			const { hub } = createHub({ models: [chat, search], scoped: true });
+			hub.handleInput("\t");
+
+			for (const ch of "chat-model") hub.handleInput(ch);
+			hub.handleInput("\n");
+			const chatStrip = footerLine(hub.render(400));
+			expect(chatStrip).toContain("default");
+			expect(chatStrip).toContain("smol");
+			expect(chatStrip).toContain("judge");
+			expect(chatStrip).toContain("retry-fallback");
+			expect(chatStrip).not.toContain("image");
+			expect(chatStrip).not.toContain("web");
+			expect(chatStrip).not.toContain("speech");
+			expect(chatStrip).not.toContain("dictation");
+			hub.handleInput(ESC);
+
+			hub.handleInput(ESC); // clear query
+			for (const ch of "perplexity") hub.handleInput(ch);
+			hub.handleInput("\n");
+			const searchStrip = footerLine(hub.render(400));
+			expect(searchStrip).toContain("web");
+			expect(searchStrip).toContain("fallbacks:perplexity");
+			expect(searchStrip).not.toContain("default");
+			expect(searchStrip).not.toContain("smol");
+			expect(searchStrip).not.toContain("judge");
+			expect(searchStrip).not.toContain("retry-fallback");
 		});
 
 		test("retry-fallback chip appends the model to the default chain without a thinking strip", () => {
