@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.7] - 2026-09-21
+
 ### Breaking Changes
 
 - Anthropic streaming and provider request helpers must now be imported from `@oh-my-pi/pi-ai/providers/anthropic` instead of the package root.
@@ -9,7 +11,7 @@
 
 ### Fixed
 
-- Anthropic organization-level OAuth permission errors now rotate to an eligible sibling credential instead of failing permanently.
+- Anthropic organization-level OAuth permission errors now reliably rotate to sibling credentials and persist blocks across usage reports.
 - Fixed error handling for provider responses that do not include token usage information.
 
 ## [18.2.6] - 2026-09-18
