@@ -2,20 +2,57 @@
 
 ## [Unreleased]
 
+## [18.2.9] - 2026-09-22
+
 ### Added
 
-- `find` (and `omp find`) accepts an `omp://` docs scope: `omp://` searches every embedded harness doc and `omp://<file>.md` searches one, reporting hits as canonical `omp://` URLs that `read` opens directly, including with `:start-end` selectors ([#12758](https://github.com/can1357/oh-my-pi/pull/12758) by [@H4vC](https://github.com/H4vC)).
+- Added Claude saved resets to usage views and `/usage reset`, with automatic blocked-limit recovery and expiring-reset redemption controlled by `claudeResets`.
+
+- Added support for searching embedded harness documentation with `find` and `omp find` using `omp://` scopes, including file-specific searches and `:start-end` selectors; results open directly through canonical `omp://` URLs.
 
 ### Changed
 
-- Updated read tool prompt to always decode images inline and require explicit `:img` for SVG rendering
-
-### Removed
-
-- Removed support for image query (`?q=`) and bare image path handling in the read tool
+- Updated server-side fallback documentation and logic to target claude-opus-5-5
+- Added support for claude-opus-5-5 to model priority registry
+- Updated the read tool guidance to decode images inline by default and require an explicit `:img` selector for SVG rendering.
+- Improved model discovery and fallback behavior: authentication failures are surfaced in the `/models` hub, and models without a matching role-specific fallback now use the default fallback chain.
+- Improved resilience for subagents by retrying provider stream failures that occur after partial output and preserving configured ordered model fallbacks at startup.
+- MCP OAuth with Google issuers now requests offline access so refresh tokens can be issued; repeated auth-broker token rotations also preserve the required refresh and client metadata.
+- MCP servers from omp-plugins now expand `${CLAUDE_PLUGIN_ROOT}` and `${OMP_PLUGIN_ROOT}` in commands, arguments, and working directories.
+- `/review` now uses the session's current working directory after `/move` or `/wt`.
+- Pasted and dragged image files now retain their original filesystem paths so the agent can act on the source files directly.
+- Custom sessions can now be moved across filesystems without losing transcripts or artifacts.
+- `hub jobs` now returns a compact, non-consuming status summary instead of replaying completed output or consuming pending auto-delivery.
+- The display-reset shortcut now works while the ask dialog has keyboard focus, and `tab.press()` provides a clear error for the legacy argument order.
+- Wayland keyboard input now follows the compositor's active XKB layout instead of assuming a US layout.
+- LSP diagnostics now refresh when watched files are created or deleted and after a server reload.
+- Compiled bytecode binaries now start correctly when bundled dependencies use `import.meta.resolve`.
 
 ### Fixed
 
+- Fixed JavaScript `eval` assignments in cells containing top-level `await` so they persist into subsequent cells.
+- Fixed skill hints becoming out of sync with the active prompt after discarded rebuilds and in advisor sessions.
+- Restored `pi.pi.askToolRenderer` for extensions that replace the built-in ask tool, preserving native rendering.
+- Fixed npm plugin upgrades and reinstalls leaving stale or duplicate manifest entries that could break `bun install`.
+- Fixed `eval` waits longer than approximately 24.8 days returning immediately because of native timer overflow.
+- Fixed deleted sessions being resurrected from stale rewrite backups.
+- Fixed `/collab` relay connections honoring `HTTPS_PROXY` and `NO_PROXY`.
+- Fixed sessions remaining blocked by queued turns or Hindsight auto-recall after disposal or cancellation.
+- Fixed edits to auto-generated files aborting the entire turn; they now return a tool-scoped error.
+- Fixed Edit handling of invalid overlapping selections in multibyte text so the worker reports a match error instead of panicking.
+- Fixed local memory consolidation on case-insensitive filesystems when project path casing changes between launches.
+- Fixed first-time Xcode MCP connections on macOS by allowing the signed `omp` binary to request Apple Events permission.
+- Fixed stale or duplicated TTSR trigger events during streaming.
+- Fixed MCP OAuth credentials retaining their refresh endpoint and client metadata across repeated token rotations.
+- Fixed local model and provider retry behavior for streamed and partially buffered failures.
+- Fixed memory and session cleanup issues that could leave stale artifacts or inconsistent state.
+- `lsp.formatOnWrite` now prefers a dedicated `isLinter` formatter server when a type-checker also claims the file ([#12847](https://github.com/can1357/oh-my-pi/pull/12847) by [@roboomp](https://github.com/roboomp)).
+- `/extensions` no longer shows OMP-installed marketplace capabilities as disabled behind the foreign-plugin opt-in gate ([#12849](https://github.com/can1357/oh-my-pi/pull/12849) by [@roboomp](https://github.com/roboomp)).
+
+### Removed
+
+- Removed support for image query parameters (`?q=`) and bare image paths in the read tool.
+- Custom models now honor provider-level `transport: pi-native` and send requests to the native gateway ([#12845](https://github.com/can1357/oh-my-pi/pull/12845) by [@joshrzemien](https://github.com/joshrzemien)).
 - Fixed live models that match no `retry.fallbackChains` role primary (e.g. Fable after `/model`) resolving no chain, so a wait longer than `retry.maxDelayMs` aborted the session instead of walking `default` ([#12421](https://github.com/can1357/oh-my-pi/issues/12421)).
 - Fixed skill hints drifting from the active prompt after discarded rebuilds or in advisor sessions ([#12148](https://github.com/can1357/oh-my-pi/pull/12148) by [@jerome-benoit](https://github.com/jerome-benoit)).
 - Restored `askToolRenderer` on the extension namespace (`pi.pi.askToolRenderer`) after the pi-tui renderer migration dropped it, so extensions that shadow the built-in ask tool can keep the native rendering again. ([#12694](https://github.com/can1357/oh-my-pi/pull/12694) by [@xiechimon](https://github.com/xiechimon))
@@ -107,6 +144,7 @@
 - Fixed clipboard paste stalling on an empty clipboard; image and text clipboard reads now run concurrently so the empty-clipboard status surfaces after the slower read instead of the sum of both.
 - Fixed memory recall blocks carrying a minute-resolution `Current time` stamp that dirtied the cached system prompt on every refresh; recall rows already carry dates, so the stamp is removed.
 - Fixed `omp auth-broker token` and `omp auth-gateway token` exiting silently without creating a token on Windows when no token file exists yet; token and config reads now use `node:fs` instead of `Bun.file`.
+
 ## [18.2.5] - 2026-09-17
 
 ### Breaking Changes
@@ -2545,3 +2583,4 @@
 Older entries are archived in [packages\coding-agent\CHANGELOG.md@66783f3c68ba](https://github.com/can1357/oh-my-pi/blob/66783f3c68ba682828e684c33070fa2c905a55a4/packages\coding-agent\CHANGELOG.md).
 Older entries are archived in [packages/coding-agent/CHANGELOG.md@48b07e000c63](https://github.com/can1357/oh-my-pi/blob/48b07e000c630f9f071eec6ad4d5580a898bb8dd/packages/coding-agent/CHANGELOG.md).
 Older entries are archived in [packages/coding-agent/CHANGELOG.md@4c6407864c6e](https://github.com/can1357/oh-my-pi/blob/4c6407864c6e2b66d3d1e7852beab736058abb0f/packages/coding-agent/CHANGELOG.md).
+Older entries are archived in [packages/coding-agent/CHANGELOG.md@da359efe2858](https://github.com/can1357/oh-my-pi/blob/da359efe2858f68baa4ae290574c7c4c9c8da3c3/packages/coding-agent/CHANGELOG.md).
