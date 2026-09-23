@@ -32,7 +32,7 @@ describe("USTC login wiring (fork: iWAN tunnel)", () => {
 		expect(entry?.login).toBeDefined();
 	});
 
-	test("AuthStorage.login('ustc') validation goes through the tunneled fetch when route port is set", async () => {
+	test("AuthStorage.oauth.login('ustc') validation goes through the tunneled fetch when route port is set", async () => {
 		// Route port set → routeFetch proxies through the SOCKS bridge, which
 		// (with no real server) fails with a connection error instead of
 		// reaching the mock. That proves the tunnel was injected: plain fetch
@@ -42,12 +42,12 @@ describe("USTC login wiring (fork: iWAN tunnel)", () => {
 
 		const store = new SqliteAuthCredentialStore(new Database(":memory:"));
 		const storage = new AuthStorage(store);
-		await storage.reload();
+		await storage.credentials.reload();
 
 		// Tunneled fetch to a dead SOCKS port → connection refused error,
 		// NOT the mock's success. This distinguishes tunneled from direct.
 		await expect(
-			storage.login("ustc", {
+			storage.oauth.login("ustc", {
 				onAuth: () => {},
 				onPrompt: async () => "sk-test-ustc-key",
 				onProgress: () => {},
@@ -60,7 +60,7 @@ describe("USTC login wiring (fork: iWAN tunnel)", () => {
 		store.close();
 	});
 
-	test("AuthStorage.login('ustc') validates directly when no tunnel is up", async () => {
+	test("AuthStorage.oauth.login('ustc') validates directly when no tunnel is up", async () => {
 		// No route port → routeFetch falls back to the caller's fetch.
 		setIwanRoutePort(undefined);
 		const fetchMock: FetchImpl = vi.fn(
@@ -73,16 +73,16 @@ describe("USTC login wiring (fork: iWAN tunnel)", () => {
 
 		const store = new SqliteAuthCredentialStore(new Database(":memory:"));
 		const storage = new AuthStorage(store);
-		await storage.reload();
+		await storage.credentials.reload();
 
-		await storage.login("ustc", {
+		await storage.oauth.login("ustc", {
 			onAuth: () => {},
 			onPrompt: async () => "sk-valid-ustc",
 			onProgress: () => {},
 			fetch: fetchMock,
 		});
 
-		const credential = await storage.get("ustc");
+		const credential = await storage.credentials.get("ustc");
 		expect(credential).toEqual({ type: "api_key", key: "sk-valid-ustc", source: "login" });
 		expect(fetchMock).toHaveBeenCalled();
 		store.close();
