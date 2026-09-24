@@ -6254,7 +6254,7 @@ dependencies = [
 
 [[package]]
 name = "pi-iwan"
-version = "18.2.11"
+version = "18.3.0"
 dependencies = [
  "aes 0.8.4",
  "aes-gcm",
@@ -6264,7 +6264,7 @@ dependencies = [
  "hmac",
  "md-5 0.10.6",
  "sha2 0.10.9",
- "thiserror 2.0.20",
+ "thiserror 2.0.21",
  "tokio",
 ]
 
