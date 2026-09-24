@@ -550,11 +550,15 @@ export interface StreamOptions {
 	 * Optional callback for inspecting or replacing provider payloads before sending.
 	 * Return undefined to keep the payload unchanged.
 	 */
-	onPayload?: (payload: unknown, model?: Model<Api>) => unknown | undefined | Promise<unknown | undefined>;
+	onPayload?: (
+		payload: unknown,
+		model?: Model<Api>,
+		signal?: AbortSignal,
+	) => unknown | undefined | Promise<unknown | undefined>;
 	/**
 	 * Optional callback for provider response metadata after headers are received.
 	 */
-	onResponse?: (response: ProviderResponseMetadata, model?: Model<Api>) => void | Promise<void>;
+	onResponse?: (response: ProviderResponseMetadata, model?: Model<Api>, signal?: AbortSignal) => void | Promise<void>;
 	/**
 	 * Optional callback for raw Server-Sent Events as they arrive from HTTP streaming providers,
 	 * plus synthesized SSE-shaped frames for the Codex WebSocket transport (one synthetic frame
