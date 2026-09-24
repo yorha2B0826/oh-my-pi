@@ -564,7 +564,7 @@ const SESSION_CWD_CHANGE_REJECTED = Symbol("sessionCwdChangeRejected");
 export function powerAssertionOptions(mode: "off" | "idle" | "display" | "system"): PowerAssertionOptions | undefined {
 	if (mode === "off") return undefined;
 	return {
-		reason: "Oh My Pi agent session",
+		reason: "omp agent session",
 		idle: true,
 		display: mode === "display" || mode === "system",
 		system: mode === "system",
@@ -2316,6 +2316,7 @@ export class AgentSession {
 			status: job.status,
 			label: job.label,
 			startTime: job.startTime,
+			endTime: job.endTime,
 			agentId: job.agentId,
 		}));
 		const delivery = manager.getDeliveryState(ownerFilter);
@@ -2450,7 +2451,7 @@ export class AgentSession {
 		if (this.#isDisposed) return;
 		if (epoch !== this.#asyncDeliveryEpoch) return;
 		if (manager.isDeliverySuppressed(jobId)) return;
-		const durationMs = job ? Math.max(0, Date.now() - job.startTime) : undefined;
+		const durationMs = job ? Math.max(0, (job.endTime ?? Date.now()) - job.startTime) : undefined;
 		await this.yieldQueue.enqueueWithReceipt<AsyncResultEntry>("async-result", {
 			jobId,
 			result: formatted,
