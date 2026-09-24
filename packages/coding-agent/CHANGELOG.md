@@ -4,7 +4,41 @@
 
 ### Added
 
-- Added `additionalContext` to extension and hook `tool_call` results, plus `ctx.addAdditionalContext()` for registered tools, to pass trusted instructions to the model after a tool call without changing its result ([#11998](https://github.com/can1357/oh-my-pi/pull/11998) by [@H4vC](https://github.com/H4vC))
+- Added trusted additional context support for extension and hook tool results, including `ctx.addAdditionalContext()` for registered tools, allowing instructions to be passed to the model without altering the tool result.
+- Added dictation support to `/btw` follow-up input, including microphone controls on the follow-up line.
+- Added opt-in CUDA support to the Nix package for tiny-model inference with the ONNX Runtime CUDA execution provider.
+- Added support for multiple simultaneous browser instances, allowing tabs from browsers such as Chrome and Edge to remain connected and usable at the same time.
+
+### Changed
+
+- Shortened the default system prompt by removing redundant rules and empty sections, reducing token usage by about 150 tokens with default settings.
+
+### Fixed
+
+- `omp update` and the startup update check now use your configured npm registry (`.npmrc`, `npm_config_registry`, or bunfig, including scoped registries and auth tokens) instead of always querying registry.npmjs.org ([#13115](https://github.com/can1357/oh-my-pi/pull/13115) by [@H4vC](https://github.com/H4vC))
+- Fixed auto-QA grievance pushes getting stuck forever behind one report the collector rejects: tool names are clamped to the collector's 128-byte limit, rejected reports are set aside with the server's error (shown in `omp grievances list` and `push`), and the rest of the queue keeps sending ([#13091](https://github.com/can1357/oh-my-pi/issues/13091), [#13119](https://github.com/can1357/oh-my-pi/pull/13119) by [@NaC-L](https://github.com/NaC-L))
+- Fixed advisor reviews making an extra model request after a turn whose only tool calls were `advise`. That request re-sent the whole review context just so the advisor could reply "done", with no new notes. The review now ends after the advise-only turn; a turn that also calls other tools continues as before ([#13132](https://github.com/can1357/oh-my-pi/pull/13132) by [@alnaggar-dev](https://github.com/alnaggar-dev)).
+- Fixed the advisor replaying the whole main transcript after the main session's per-turn prune blanked tool results it had already seen. The advisor now keeps its context across the prune; rollback, branch, edited messages, compaction and session switch still re-prime it (part of [#7226](https://github.com/can1357/oh-my-pi/issues/7226), [#13131](https://github.com/can1357/oh-my-pi/pull/13131) by [@alnaggar-dev](https://github.com/alnaggar-dev)).
+- Fixed `/login` crashing source-link and dev installs with `NameTooLong reading "file:file:…"` once an extension loader had loaded. The legacy-pi specifier shim no longer re-enters itself while resolving a canonical `@oh-my-pi/pi-*` subpath such as `@oh-my-pi/pi-ai/index.js`, so `require()` of those subpaths resolves to the host copy ([#12293](https://github.com/can1357/oh-my-pi/issues/12293), [#13127](https://github.com/can1357/oh-my-pi/pull/13127) by [@alnaggar-dev](https://github.com/alnaggar-dev)).
+- Fixed advisors configured with `auto` thinking running at `medium` instead of following the main session's current effort. An `auto` advisor now runs at the effort the main session uses for the current turn (the classifier's pick under `auto`, the set level otherwise, `medium` when thinking is off), updated at each review without rebuilding the advisor; on a retry-fallback model it keeps the fallback's effort until its main model is restored ([#13130](https://github.com/can1357/oh-my-pi/pull/13130) by [@alnaggar-dev](https://github.com/alnaggar-dev)).
+- Fixed large edit diffs being sent whole in advisor reviews; they are now redacted and cut to the same 8 KiB / 80-line budget as other tool output ([#13129](https://github.com/can1357/oh-my-pi/pull/13129) by [@alnaggar-dev](https://github.com/alnaggar-dev)).
+- Updated `omp update` and the startup update check to use the configured npm registry, including scoped registries and authentication tokens.
+- Fixed auto-QA grievance uploads so an invalid report no longer blocks the rest of the queue; rejected reports are now reported with the server error.
+- Fixed Windows `read` failures for existing files when a line selector such as `:1-40` is used.
+- Fixed memory storage error reporting so failed `retain`, `learn`, and backend saves identify the failed item and include the underlying storage error.
+- Fixed malformed user-level `mcp.json` files disabling all MCP sources; valid sources now continue loading with a warning.
+- Fixed retry fallback loops that could retry indefinitely when a fallback resolved to the same effective request.
+- Fixed the setup wizard incorrectly reporting Gemini web search as unconfigured when Antigravity OAuth is active.
+- Fixed headless print mode abandoning the advisor's final review when the review model fails and a configured fallback reviewer is available.
+- Fixed embedded shell startup when the inherited working directory has been deleted.
+- Fixed Codex usage displays showing a stale subscription plan after the account plan changed.
+- Fixed explicit model or provider selections from bypassing `disabledProviders`; disabled providers are now refused and skipped during fallback.
+- Fixed usage views incorrectly combining model-specific quota limits with shared quota windows; each limit is now shown separately.
+- Fixed `write xd://<tool>` handling of devices with lenient argument validation so tools can provide their own precise responses for schema mismatches.
+- Fixed Anthropic server-side fallback requests failing because of an invalid fallback model name.
+- Fixed requests to large-output models failing near the context limit; the output allowance now adjusts to fit the remaining context.
+- Fixed system prompts that referenced tools by bare names when those tools were available only through `xd://` devices, including Hindsight and Mnemopi memory tools.
+- Fixed dictation remaining active when recording was restarted while the previous clip was still transcribing.
 
 ## [18.3.0] - 2026-09-24
 
@@ -2663,3 +2697,4 @@ Older entries are archived in [packages/coding-agent/CHANGELOG.md@48b07e000c63](
 Older entries are archived in [packages/coding-agent/CHANGELOG.md@4c6407864c6e](https://github.com/can1357/oh-my-pi/blob/4c6407864c6e2b66d3d1e7852beab736058abb0f/packages/coding-agent/CHANGELOG.md).
 Older entries are archived in [packages/coding-agent/CHANGELOG.md@da359efe2858](https://github.com/can1357/oh-my-pi/blob/da359efe2858f68baa4ae290574c7c4c9c8da3c3/packages/coding-agent/CHANGELOG.md).
 Older entries are archived in [packages/coding-agent/CHANGELOG.md@3642216898e4](https://github.com/can1357/oh-my-pi/blob/3642216898e473f6a4472e78f792e641891c6d62/packages/coding-agent/CHANGELOG.md).
+Older entries are archived in [packages/coding-agent/CHANGELOG.md@d95ba9ea5e83](https://github.com/can1357/oh-my-pi/blob/d95ba9ea5e8370e1cc0e7fc83cef7c7db862b543/packages/coding-agent/CHANGELOG.md).

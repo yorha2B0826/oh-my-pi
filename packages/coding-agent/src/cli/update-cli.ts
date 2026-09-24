@@ -21,6 +21,7 @@ import {
 	unsupportedProxyMessage,
 	withTimeoutSignal,
 } from "../utils/fetch-timeout";
+import { DEFAULT_NPM_REGISTRY, type NpmRegistryResolver } from "./npm-registry";
 
 // Fork build: update checks/installs target THIS fork's releases, hardcoded so
 // no environment configuration is needed. Upstream merges will conflict here by
@@ -30,18 +31,6 @@ const PACKAGE = "@oh-my-pi/pi-coding-agent";
 const HOMEBREW_FORMULA = "yorha2b0826/omp-ustc/omp";
 const MISE_TOOL = "github:yorha2B0826/oh-my-pi";
 const NIX_STORE_DIR = "/nix/store";
-/**
- * Official npm registry origin.
- *
- * Pinned across both the version check and the bun install step so the two
- * agree on which catalog they are talking to. A user's bun may be pointed at
- * an unofficial mirror (corporate proxy, Taobao, etc.) that lags the upstream
- * registry by minutes-to-hours, in which case `getLatestRelease` would resolve
- * a version the mirror has not yet replicated and the install would fail with
- * `No version matching "X" found for specifier "<pkg>" (but package exists)`.
- * See #1686.
- */
-const NPM_REGISTRY = "https://registry.npmjs.org/";
 const GITHUB_API = "https://api.github.com";
 const RELEASE_METADATA_TIMEOUT_MS = 30_000;
 const BINARY_DOWNLOAD_TIMEOUT_MS = 15 * 60_000;
@@ -99,6 +88,11 @@ export interface ReleaseInfo {
 	dist?: ReleaseDist;
 	/** npm names to install, resolved after following any `omp.rename` pointers. */
 	packages: ReleasePackages;
+	/**
+	 * Registry URL the version was resolved from; bun/npm installs pin to it
+	 * so the install sees the same catalog as the check. See #1686.
+	 */
+	registry: string;
 }
 
 export interface ReleaseBinaryAsset {
@@ -805,14 +799,14 @@ async function resolveUpdateTarget(options: { allowPackageManagers: boolean }): 
 }
 
 /**
- * Get the latest release info from the npm registry, following `omp.rename`
- * pointers ({@link resolveReleaseRename}) when the package has moved to a new
- * npm name. Version, dist, and install names all come from the final manifest
- * in the chain. Uses npm instead of GitHub API to avoid unauthenticated rate
- * limiting.
+ * Get the latest release info from this fork's GitHub releases.
+ *
+ * Fork build: the fork does not publish to npm, so the npm-registry path
+ * would report upstream's version instead of the fork's. `options.registries`
+ * is accepted for API compatibility with upstream callers and unused here.
  */
 export async function getLatestRelease(
-	options: { timeoutMs?: number; channel?: UpdateChannel } = {},
+	options: { timeoutMs?: number; channel?: UpdateChannel; registries?: NpmRegistryResolver } = {},
 ): Promise<ReleaseInfo> {
 	const timeoutMs = options.timeoutMs ?? RELEASE_METADATA_TIMEOUT_MS;
 
@@ -831,7 +825,13 @@ export async function getLatestRelease(
 			throw new Error("Malformed GitHub releases response for fork: missing tag_name");
 		}
 		const version = data.tag_name.replace(/^v/, "");
-		return { tag: data.tag_name, version, dist: "binary", packages: { ...CURRENT_PACKAGES } };
+		return {
+			tag: data.tag_name,
+			version,
+			dist: "binary",
+			packages: { ...CURRENT_PACKAGES },
+			registry: DEFAULT_NPM_REGISTRY,
+		};
 	}
 }
 
@@ -1390,13 +1390,15 @@ function buildVersionedPackageInstallArgs(
 /**
  * Build the bun argv used to globally install a specific omp version.
  *
- * The version is selected by hitting {@link NPM_REGISTRY} directly in
- * {@link getLatestRelease}, so the install MUST observe the same catalog:
+ * The version is selected by querying the resolved registry in
+ * {@link getLatestRelease} ({@link ReleaseInfo.registry}), so the install
+ * MUST observe the same catalog:
  *
- * - `--registry=${NPM_REGISTRY}` pins the install to the official registry
- *   regardless of the user's bunfig/`.npmrc`. A mirror (corporate proxy,
- *   Taobao, …) that hasn't yet replicated the release would otherwise reject
- *   a version the upstream registry already advertises.
+ * - `--registry=<release registry>` pins the install to the registry the
+ *   check used. That is the user's configured feed when one is set, and
+ *   {@link DEFAULT_NPM_REGISTRY} otherwise, so a bun whose own resolution
+ *   differs (project bunfig, lagging mirror) cannot reject a version the
+ *   check already advertised.
  * - `--no-cache` tells bun to ignore its on-disk manifest snapshot so it
  *   re-fetches metadata from that registry on every invocation.
  *
@@ -1421,18 +1423,21 @@ export function buildBunInstallArgs(
 	expectedVersion: string,
 	nativeTag: string = currentNativeTag(),
 	packages: ReleasePackages = CURRENT_PACKAGES,
+	options: { registry?: string } = {},
 ): string[] {
 	return [
 		"install",
 		"-g",
 		"--no-cache",
-		`--registry=${NPM_REGISTRY}`,
+		`--registry=${options.registry ?? DEFAULT_NPM_REGISTRY}`,
 		...buildVersionedPackageInstallArgs(expectedVersion, nativeTag, packages),
 	];
 }
 
 /**
  * Build the npm argv used to update npm-managed global installs.
+ * Pins `--registry` to the checked registry for the same reason as
+ * {@link buildBunInstallArgs}.
  *
  * `force` is set only for rename migrations: npm refuses to write the `omp`
  * bin while the old package still owns it (`EEXIST`), and the migration
@@ -1443,13 +1448,13 @@ export function buildNpmInstallArgs(
 	expectedVersion: string,
 	nativeTag: string = currentNativeTag(),
 	packages: ReleasePackages = CURRENT_PACKAGES,
-	flags: { force?: boolean } = {},
+	flags: { force?: boolean; registry?: string } = {},
 ): string[] {
 	return [
 		"install",
 		"-g",
 		...(flags.force ? ["--force"] : []),
-		`--registry=${NPM_REGISTRY}`,
+		`--registry=${flags.registry ?? DEFAULT_NPM_REGISTRY}`,
 		...buildVersionedPackageInstallArgs(expectedVersion, nativeTag, packages),
 	];
 }
@@ -1519,10 +1524,15 @@ function packageManagerMigrationSteps(manager: "bun" | "npm", release: ReleaseIn
 	return {
 		async install() {
 			if (manager === "bun") {
-				const args = buildBunInstallArgs(release.version, nativeTag, release.packages);
+				const args = buildBunInstallArgs(release.version, nativeTag, release.packages, {
+					registry: release.registry,
+				});
 				return (await $`bun ${args}`.nothrow()).exitCode;
 			}
-			const args = buildNpmInstallArgs(release.version, nativeTag, release.packages, { force: true });
+			const args = buildNpmInstallArgs(release.version, nativeTag, release.packages, {
+				force: true,
+				registry: release.registry,
+			});
 			return (await $`npm ${args}`.nothrow()).exitCode;
 		},
 		async removeOld() {
@@ -1598,7 +1608,9 @@ async function updateViaBun(release: ReleaseInfo): Promise<InstalledVersionVerif
 	if (release.packages.pkg !== PACKAGE) {
 		await migrateRenamedInstall(release, packageManagerMigrationSteps("bun", release));
 	} else {
-		const args = buildBunInstallArgs(release.version, currentNativeTag(), release.packages);
+		const args = buildBunInstallArgs(release.version, currentNativeTag(), release.packages, {
+			registry: release.registry,
+		});
 		const result = await $`bun ${args}`.nothrow();
 		if (result.exitCode !== 0) {
 			throw new Error(`bun install failed with exit code ${result.exitCode}`);
@@ -1622,7 +1634,9 @@ async function updateViaNpm(release: ReleaseInfo): Promise<InstalledVersionVerif
 		await migrateRenamedInstall(release, packageManagerMigrationSteps("npm", release));
 		return undefined;
 	}
-	const args = buildNpmInstallArgs(release.version, currentNativeTag(), release.packages);
+	const args = buildNpmInstallArgs(release.version, currentNativeTag(), release.packages, {
+		registry: release.registry,
+	});
 	const result = await $`npm ${args}`.nothrow();
 	if (result.exitCode !== 0) {
 		throw new Error(`npm install failed with exit code ${result.exitCode}`);
