@@ -23,6 +23,8 @@ import {
 } from "../utils/fetch-timeout";
 import { DEFAULT_NPM_REGISTRY, type NpmRegistryResolver } from "./npm-registry";
 
+import { cfgUpdateChannel } from "../modes/settings";
+
 // Fork build: update checks/installs target THIS fork's releases, hardcoded so
 // no environment configuration is needed. Upstream merges will conflict here by
 // design — always keep the fork values (yorha2B0826).
