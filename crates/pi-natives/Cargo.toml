@@ -60,6 +60,7 @@ pi-edit.workspace = true
 pi-iso.workspace = true
 pi-iwan.workspace = true
 pi-shell.workspace = true
+pi-vfs.workspace = true
 pi-voice.workspace = true
 pi-walker.workspace = true
 portable-pty.workspace = true
