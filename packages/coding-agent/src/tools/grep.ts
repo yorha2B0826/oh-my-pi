@@ -21,7 +21,7 @@ import {
 import { getEditStore } from "../edit/store";
 import { formatHashlineHeader } from "@oh-my-pi/pi-tui/tools/hashline-format";
 import { sessionResolveContext } from "../internal-urls/context";
-import { extractUriScheme, parseInternalUrl } from "../internal-urls/parse";
+import { extractUriScheme } from "../internal-urls/parse";
 import { InternalUrlRouter } from "../internal-urls/router";
 import type { ResolveContext } from "../internal-urls/types";
 import grepDescription from "../prompts/tools/grep.md" with { type: "text" };
@@ -38,7 +38,6 @@ import { isFindEnabled } from "./jfind";
 import {
 	expandDelimitedPathEntries,
 	hasGlobPathChars,
-	hasUrlPathGlobChars,
 	isLineInRanges,
 	probeLiteralPathExists,
 	type ResolvedSearchTarget,
@@ -47,7 +46,7 @@ import {
 	splitPathAndSelPreferringLiteral,
 } from "./path-utils";
 import { type LineRange, parseLineRanges, selectorLineRanges } from "@oh-my-pi/pi-tui/tools/line-ranges";
-import { splitInternalUrlSel, splitPathAndSel } from "@oh-my-pi/pi-tui/tools/read";
+import { splitPathAndSel } from "@oh-my-pi/pi-tui/tools/read";
 import { toPathList } from "@oh-my-pi/pi-tui/render/render-utils";
 import { isRawSelector } from "./read-selector";
 import { formatCodeFrameLine } from "@oh-my-pi/pi-tui/render/render-utils";
@@ -133,14 +132,15 @@ function isReadSelectorGrammar(sel: string): boolean {
 
 async function parsePathSpecs(rawEntries: readonly string[], cwd: string): Promise<GrepPathSpec[]> {
 	const specs: GrepPathSpec[] = [];
+	const router = InternalUrlRouter.instance();
 	for (const entry of rawEntries) {
-		// Internal URLs use the URL-aware splitter, which peels selector-shaped
-		// tails only for schemes declaring line selectors and leaves opaque
-		// server-defined URIs intact. Unlike filesystem paths, their
+		// Internal URLs (single-slash aliases included) use the router's splitter,
+		// which peels selector-shaped tails only for schemes declaring line
+		// selectors and leaves opaque server-defined URIs intact. Unlike filesystem paths, their
 		// verbatim/index display modes (`raw`, `conflicts`) carry no meaning for
 		// content search, so we accept them — searching the whole resource — and
 		// still honor any embedded line range as a match filter.
-		const internalSplit = splitInternalUrlSel(entry);
+		const internalSplit = router.split(entry);
 		if (internalSplit.sel !== undefined) {
 			// Reject selectors read's parseSel would reject (`:1-1:1-2`, `:conflicts:1-1`)
 			// plus read-only tails (`:-10`) instead of silently widening the search or
@@ -719,16 +719,12 @@ function mergeGrepResults(left: GrepResult, right: GrepResult, maxCount: number)
  */
 async function resolveVirtualInternalResource(
 	rawPath: string,
-	scheme: string,
 	context: ResolveContext,
 	ranges: readonly LineRange[] | undefined,
 ): Promise<VirtualSearchResource[]> {
 	const internalRouter = InternalUrlRouter.instance();
-	const handler = internalRouter.getHandler(scheme);
-	if (handler?.enumerate) {
-		const entries = await handler.enumerate(parseInternalUrl(rawPath), context);
-		return entries.map(entry => ({ path: entry.url, content: entry.content, ranges }));
-	}
+	const entries = await internalRouter.enumerate(rawPath, context);
+	if (entries) return entries.map(entry => ({ path: entry.url, content: entry.content, ranges }));
 	const resource = await internalRouter.resolve(rawPath, context);
 	// A directory listing with no local path (e.g. a remote dir) has no real
 	// contents to grep — searching its listing text would be misleading.
@@ -763,7 +759,7 @@ async function resolveInternalSearchInputs(opts: {
 		const ranges = spec?.ranges;
 		// URL globs stay for the scope resolver, which expands them over a
 		// locatable base or rejects them.
-		if (hasUrlPathGlobChars(rawPath)) {
+		if (internalRouter.isGlob(rawPath)) {
 			if (ranges) throw new ToolError(`Line-range selector requires a single file, not a glob: ${spec?.original}`);
 			continue;
 		}
@@ -777,7 +773,7 @@ async function resolveInternalSearchInputs(opts: {
 			}
 			continue;
 		}
-		const expanded = await resolveVirtualInternalResource(rawPath, scheme, opts.context, ranges);
+		const expanded = await resolveVirtualInternalResource(rawPath, opts.context, ranges);
 		virtualInputIndexes.add(idx);
 		for (const virtual of expanded) {
 			virtualResources.push(virtual);
@@ -833,7 +829,7 @@ export class GrepTool implements AgentTool<typeof searchSchema, GrepToolDetails>
 			hasFind: this.session.isToolActive?.("find") ?? isFindEnabled(this.session),
 			eagerDelegation: sessionDelegationBias(this.session) === "eager",
 			scoutAvailable: isScoutSpawnable(
-				cfgTaskDisabledAgents.get(this.session.settings) as string[] | undefined,
+				cfgTaskDisabledAgents.get(this.session.settings),
 				this.session.getSessionSpawns?.() ?? "*",
 			),
 		});
