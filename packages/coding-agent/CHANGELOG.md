@@ -4,12 +4,22 @@
 
 ### Added
 
+- Added unified predictive text engine with pluggable N-gram, SmolLM2, and macOS native providers
+- Added `omp predict` CLI command for evaluating completion engine performance
+- Added cross-process prediction daemon for managing state, history ingestion, and engine fallbacks
+- Added support for dynamic eval prelude guidance via hidden session notices
+- Added a required `complexity` rationale field to the `task` tool for improved auto-thinking depth classification
+- Added the `wait` tool automatically to agents that use `task` or `bash` to improve background process coordination
 - Added a context-aware hint system for empty composers that displays suggestions based on agent activity and effort
 - Added an optional `scope` to the `retain` and `learn` tools, offered when `mnemopi.scoping` is `global` or `per-project-tagged`: `scope: "global"` stores a memory or lesson in the Mnemopi bank every project recalls instead of the current project's bank ([#13324](https://github.com/can1357/oh-my-pi/pull/13324) by [@alphastorm](https://github.com/alphastorm)).
 - Added `/btw` to the commands available from a focused subagent view; it asks about the focused agent's transcript instead of the main session's, and its answers can be copied or followed up but not branched into the main session ([#13412](https://github.com/can1357/oh-my-pi/pull/13412) by [@H4vC](https://github.com/H4vC))
 
 ### Changed
 
+- Updated `spelling.autocomplete` to an enum-based configuration for engine selection
+- Optimized mid-session `/computer` toggles to bypass full system-prompt rebuilds
+- Updated window input policy to default to background actions and replaced the `delivery` option with a `takeover` boolean flag for opt-in activation
+- Aligned orchestrator task documentation and prompts to a Target/Change/Acceptance format
 - Migrated all hardcoded keyboard and slash-command shortcut labels to dynamic, platform-aware UI hints
 - Centralized usage tracking for slash commands and hints to a persistent, namespaced storage system
 

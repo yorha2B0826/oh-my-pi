@@ -142,6 +142,7 @@ rust_shared_library(
         "//crates/pi-edit",
         "//crates/pi-iwan",
         "//crates/pi-iso",
+        "//crates/pi-predict",
         "//crates/pi-shell",
         "//crates/pi-vcs",
         "//crates/pi-vfs",
