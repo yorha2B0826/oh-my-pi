@@ -5456,18 +5456,25 @@ dependencies = [
 [[package]]
 name = "napi"
 version = "3.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b12638855cec016784a7e17cc4ecbdee7ca8b0a3456aa50640d0ee5ed1a42f8"
 dependencies = [
+ "anyhow",
  "bitflags 2.13.2",
+ "chrono",
  "ctor",
+ "encoding_rs",
  "futures",
+ "futures-core",
+ "indexmap",
  "libc",
  "napi-build",
  "napi-sys",
  "nohash-hasher",
  "rustc-hash",
+ "serde",
+ "serde_json",
  "tokio",
+ "tokio-stream",
+ "tracing",
 ]
 
 [[package]]
@@ -6515,7 +6522,7 @@ dependencies = [
 
 [[package]]
 name = "pi-ast"
-version = "18.3.3"
+version = "18.3.4"
 dependencies = [
  "anyhow",
  "ast-grep-core",
@@ -6585,7 +6592,7 @@ dependencies = [
 
 [[package]]
 name = "pi-builtins"
-version = "18.3.3"
+version = "18.3.4"
 dependencies = [
  "ansi-width",
  "anyhow",
@@ -6670,11 +6677,11 @@ dependencies = [
 
 [[package]]
 name = "pi-diff"
-version = "18.3.3"
+version = "18.3.4"
 
 [[package]]
 name = "pi-edit"
-version = "18.3.3"
+version = "18.3.4"
 dependencies = [
  "async-trait",
  "parking_lot",
@@ -6693,7 +6700,7 @@ dependencies = [
 
 [[package]]
 name = "pi-iso"
-version = "18.3.3"
+version = "18.3.4"
 dependencies = [
  "async-trait",
  "libc",
@@ -6721,7 +6728,7 @@ dependencies = [
 
 [[package]]
 name = "pi-natives"
-version = "18.3.3"
+version = "18.3.4"
 dependencies = [
  "anyhow",
  "arboard",
@@ -6809,7 +6816,7 @@ dependencies = [
 
 [[package]]
 name = "pi-predict"
-version = "18.3.3"
+version = "18.3.4"
 dependencies = [
  "anyhow",
  "candle-core",
@@ -6827,7 +6834,7 @@ dependencies = [
 
 [[package]]
 name = "pi-shell"
-version = "18.3.3"
+version = "18.3.4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6857,7 +6864,7 @@ dependencies = [
 
 [[package]]
 name = "pi-vcs"
-version = "18.3.3"
+version = "18.3.4"
 dependencies = [
  "gix",
  "gix-utils",
@@ -6872,7 +6879,7 @@ dependencies = [
 
 [[package]]
 name = "pi-vfs"
-version = "18.3.3"
+version = "18.3.4"
 dependencies = [
  "async-trait",
  "libc",
@@ -6885,7 +6892,7 @@ dependencies = [
 
 [[package]]
 name = "pi-voice"
-version = "18.3.3"
+version = "18.3.4"
 dependencies = [
  "bytes",
  "flume",
@@ -6899,7 +6906,7 @@ dependencies = [
 
 [[package]]
 name = "pi-walker"
-version = "18.3.3"
+version = "18.3.4"
 dependencies = [
  "globset",
  "ignore",
@@ -8433,10 +8440,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "656b45c05d95a5704399aeef6bd0ddec7b2b3531b7c9e900abbf7c4d2190c925"
 dependencies = [
  "bincode",
- "fancy-regex 0.16.2",
  "flate2",
  "fnv",
  "once_cell",
+ "onig",
  "regex-syntax",
  "serde",
  "serde_derive",
@@ -8714,6 +8721,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.6",
+]
+
+[[package]]
+name = "tokio-stream"
+version = "0.1.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3d06f0b082ba57c26b79407372e57cf2a1e28124f78e9479fe80322cf53420b"
+dependencies = [
+ "futures-core",
+ "pin-project-lite",
+ "tokio",
 ]
 
 [[package]]
