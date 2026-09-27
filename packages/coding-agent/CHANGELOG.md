@@ -4,6 +4,10 @@
 
 ### Added
 
+- Added `omp skill list [dir] [--json]`, reporting the skills a session in that directory resolves (with discovery warnings in the JSON output), so tools can query skill listings without drift-prone reimplementations ([#12273](https://github.com/can1357/oh-my-pi/pull/12273) by [@andrebrait](https://github.com/andrebrait))
+- Added automated ingestion of existing Claude Code and Codex prompt histories to bootstrap predictive engine vocabularies for new installs
+- Added a centralized download and installation progress HUD to surface background tool and model fetches
+- Added support for SmolLM2-135M word-completion model weights with background prefetching
 - Added unified predictive text engine with pluggable N-gram, SmolLM2, and macOS native providers
 - Added `omp predict` CLI command for evaluating completion engine performance
 - Added cross-process prediction daemon for managing state, history ingestion, and engine fallbacks
@@ -12,13 +16,25 @@
 - Added the `wait` tool automatically to agents that use `task` or `bash` to improve background process coordination
 - Added a context-aware hint system for empty composers that displays suggestions based on agent activity and effort
 - Added an optional `scope` to the `retain` and `learn` tools, offered when `mnemopi.scoping` is `global` or `per-project-tagged`: `scope: "global"` stores a memory or lesson in the Mnemopi bank every project recalls instead of the current project's bank ([#13324](https://github.com/can1357/oh-my-pi/pull/13324) by [@alphastorm](https://github.com/alphastorm)).
-- Added `/btw` to the commands available from a focused subagent view; it asks about the focused agent's transcript instead of the main session's, and its answers can be copied or followed up but not branched into the main session ([#13412](https://github.com/can1357/oh-my-pi/pull/13412) by [@H4vC](https://github.com/H4vC))
+- Added `/btw` to the commands available from a focused subagent view; it asks about the focused agent's transcript instead of the main session's, keeps its side-conversation history separate from main and other agents, keeps streaming an answer after you leave the view, and its answers can be copied or followed up but not branched into the main session ([#13412](https://github.com/can1357/oh-my-pi/pull/13412), [#13431](https://github.com/can1357/oh-my-pi/pull/13431) by [@H4vC](https://github.com/H4vC))
 
 ### Changed
 
+- Unified `auto` completion mode to use the N-gram engine exclusively across all platforms, removing Apple dictionary integration for standard auto-completion
+- Updated word-completion engine to persist ghost text through manual keystrokes by disabling typed-past exclusion
+- Restricted SmolLM model weight prefetching to explicit model activation
+- Updated /play command help description to show space pauses, q quits
+- Changed read tool group summary to display "2 more lines" instead of a Ctrl+O hint
+- Granted wait tool to subagents when explicitly requested
+- Updated empty-submit interrupt policy to account for live-steered messages alongside queued input
+- Updated UI chip display to surface live-steered messages pending transcript recording
+- Updated ps command to list exited global services with --all and show live globals by default
+- Migrated all internal download progress UI to a unified activity registry, replacing legacy per-model overlay logic
+- Updated `omp tiny-models download` to support downloading the word-completion model
+- Updated window input policy to default to background actions and replaced the `delivery` option with a `takeover` boolean flag for opt-in activation
 - Updated `spelling.autocomplete` to an enum-based configuration for engine selection
 - Optimized mid-session `/computer` toggles to bypass full system-prompt rebuilds
-- Updated window input policy to default to background actions and replaced the `delivery` option with a `takeover` boolean flag for opt-in activation
+- Updated window input policy to default to background-only delivery, requiring explicit `takeover` for foreground escalation, and clarified cross-platform coordinate and activation semantics
 - Aligned orchestrator task documentation and prompts to a Target/Change/Acceptance format
 - Migrated all hardcoded keyboard and slash-command shortcut labels to dynamic, platform-aware UI hints
 - Centralized usage tracking for slash commands and hints to a persistent, namespaced storage system
