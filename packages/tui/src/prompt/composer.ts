@@ -60,9 +60,11 @@ export interface ComposerWelcomeUpdate {
 }
 
 /**
- * Placeholder-only status chrome replayed on the next first frame so the
- * status band/border exists before the session-aware status line attaches.
- * Bound to the composer shape it was rendered for; a different shape drops it.
+ * Cached status chrome replayed on the next first frame so the status
+ * band/border exists before the session-aware status line attaches. Session
+ * values are elided; project values (model, path, branch) appear only while
+ * still current (see `ComposerStatusCache`). Bound to the composer shape it was
+ * rendered for; a different shape drops it.
  */
 export interface ComposerStatusSnapshot {
 	readonly shape: string;
@@ -635,7 +637,9 @@ export class Composer implements TerminalFrameProvider {
 			// retires first so transcript prefixes can follow in order.
 			const renderedHeader = this.#header.render(width);
 			if (renderedHeader.length > 0) {
-				const liveRows = transcript.liveRowCount(width);
+				// Only the comparison below reads the height, so the walk stops at
+				// the budget instead of rendering every replayed block (#12933).
+				const liveRows = transcript.liveRowCount(width, Math.max(0, rows - renderedHeader.length - chromeRows));
 				if (!this.#historyFlush && renderedHeader.length + chromeRows + liveRows <= rows) return undefined;
 				this.#offeredHistory = {
 					id: this.#nextHistoryId++,

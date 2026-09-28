@@ -28,6 +28,7 @@ import {
 	clearRenderCache,
 	getComposerStyle,
 	getPaddingX,
+	getWidthConfigEpoch,
 	Loader,
 	Markdown,
 	Spacer,
@@ -123,7 +124,7 @@ import { setWordPredictionHost } from "@oh-my-pi/pi-tui/prompt/word-completion";
 import { USER_INTERRUPT_LABEL } from "../session/messages";
 import { resolveMarkdownLinkTargets } from "../internal-urls/hyperlink-targets";
 import { modelMentionDisplayName } from "@oh-my-pi/pi-tui/prompt/model-mention-syntax";
-import { modelMentionChipLabel } from "@oh-my-pi/pi-tui/prompt/composer-attachments";
+import { modelMentionChipLabel, shiftImageMarkers } from "@oh-my-pi/pi-tui/prompt/composer-attachments";
 import type { SessionContext } from "../session/session-context";
 import { getRecentSessions } from "../session/session-listing";
 import type { SessionManager } from "../session/session-manager";
@@ -219,20 +220,20 @@ import { PlanSaveOverlay, type PlanSaveOverlayResult } from "@oh-my-pi/pi-tui/ov
 import { ServedModelTracker } from "@oh-my-pi/pi-tui/chat/served-model-marker";
 import { SessionInfoOverlay } from "@oh-my-pi/pi-tui/overlays/session-info-overlay";
 import { SkillMessageComponent } from "@oh-my-pi/pi-tui/chat/skill-message";
-import { StatusLineComponent } from "@oh-my-pi/pi-tui/status-line";
+import { type StartupPlaceholderScope, StatusLineComponent } from "@oh-my-pi/pi-tui/status-line";
 import { statusLineHost } from "./status-line-host";
 import { stopSharedSpinnerTicker, type ToolExecutionHandle } from "@oh-my-pi/pi-tui/chat/tool-execution";
 import { TranscriptContainer } from "@oh-my-pi/pi-tui/chrome/transcript-container";
 import type { LspServerInfo as WelcomeLspServerInfo } from "@oh-my-pi/pi-tui/prompt/welcome";
-import {
-	Composer,
-	type ComposerPreferences,
-	type ComposerStatusSnapshot,
-	PINNED_HUD_TOGGLE_ID,
-} from "@oh-my-pi/pi-tui/prompt/composer";
+import { Composer, type ComposerPreferences, PINNED_HUD_TOGGLE_ID } from "@oh-my-pi/pi-tui/prompt/composer";
 import { setMagicKeywords } from "@oh-my-pi/pi-tui/prompt/magic-keywords";
 import { MAGIC_KEYWORDS } from "./magic-keywords";
-import { writeComposerStatusCache, writeComposerWelcomeCache } from "@oh-my-pi/pi-tui/prompt/composer-cache";
+import {
+	type ComposerStatusCache,
+	type ComposerStatusChrome,
+	writeComposerStatusCache,
+	writeComposerWelcomeCache,
+} from "@oh-my-pi/pi-tui/prompt/composer-cache";
 import { BtwController } from "./controllers/btw-controller";
 import { CleanseCommandController } from "./controllers/cleanse-command-controller";
 import { CommandController } from "./controllers/command-controller";
@@ -680,16 +681,19 @@ function isHudSubagent(session: ObservableSession): boolean {
  * sentinel, which the click router handles before any registry lookup.
  * Rendering delegates to the same `Text` mount as before, so output bytes are
  * unchanged — only the row map is new. Long rows wrap inside `Text` (content
- * is two cells narrower than the terminal), so the map is rebuilt per render
- * from measured wrapped heights: continuation rows belong to the agent (or
- * toggle) whose logical row started them.
+ * is two cells narrower than the terminal), so the map is built on the first
+ * click after rendering at a new width or width configuration: continuation
+ * rows belong to the agent (or toggle) whose logical row started them.
  */
 export class SubagentHudComponent implements Component {
 	readonly #text: Text;
 	readonly #lines: readonly string[];
 	readonly #order: readonly string[];
 	readonly #toggleLine: number | undefined;
-	#physicalOwner: (string | undefined)[] = [];
+	#physicalOwner?: (string | undefined)[];
+	#renderedWidth?: number;
+	#renderedRows = 0;
+	#renderedWidthConfigEpoch?: number;
 	constructor(lines: readonly string[], order: readonly string[], toggleRow?: number) {
 		this.#text = new Text(lines.join("\n"), 1, 0);
 		this.#lines = lines;
@@ -698,11 +702,26 @@ export class SubagentHudComponent implements Component {
 	}
 	render(width: number): readonly string[] {
 		const rows = this.#text.render(width);
-		this.#rebuildHitMap(width, rows.length);
+		const widthConfigEpoch = getWidthConfigEpoch();
+		if (
+			this.#renderedWidth !== width ||
+			this.#renderedRows !== rows.length ||
+			this.#renderedWidthConfigEpoch !== widthConfigEpoch
+		) {
+			this.#physicalOwner = undefined;
+		}
+		this.#renderedWidth = width;
+		this.#renderedRows = rows.length;
+		this.#renderedWidthConfigEpoch = widthConfigEpoch;
 		return rows;
 	}
 	getClickAgentAtRow(row: number): string | undefined {
-		return row >= 0 && row < this.#physicalOwner.length ? this.#physicalOwner[row] : undefined;
+		if (row < 0 || row >= this.#renderedRows || this.#renderedWidth === undefined) return undefined;
+		if (!this.#physicalOwner) {
+			if (this.#renderedWidthConfigEpoch !== getWidthConfigEpoch()) return undefined;
+			this.#rebuildHitMap(this.#renderedWidth, this.#renderedRows);
+		}
+		return this.#physicalOwner?.[row];
 	}
 	// Native wrap splits paragraphs independently, so per-line wrapped
 	// heights compose exactly to the rendered row count. A length mismatch
@@ -1682,7 +1701,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (!startupQuiet && this.#startupChangelog && cfgStartupChangelogMode.get(settings) !== "hidden") {
 			headerAfter.push(
 				new DynamicBorder(),
-				new Text(theme.bold(theme.fg("accent", "What's New")), 1, 0),
+				new Text("What's New", 1, 0).setStyleFn(t => theme.bold(theme.fg("accent", t))),
 				new Spacer(1),
 			);
 			if (cfgStartupChangelogMode.get(settings) === "summary") {
@@ -2730,7 +2749,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			display?: boolean;
 			streamingBehavior?: "steer" | "followUp";
 		},
-		options?: { preserveDraft?: boolean },
+		options?: { preserveDraft?: boolean; clearEditor?: boolean },
 	): SubmittedUserInput {
 		const submission: SubmittedUserInput = {
 			text: input.text,
@@ -2770,7 +2789,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		} else {
 			this.clearOptimisticUserMessage();
 		}
-		if (!options?.preserveDraft) {
+		if (!options?.preserveDraft && options?.clearEditor !== false) {
 			this.editor.setText("");
 			this.editor.imageLinks = undefined;
 		}
@@ -2799,11 +2818,22 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.#stopLoadingAnimation(true);
 		}
 		if (!submission.customType && !preserveDraft) {
-			this.editor.pendingImages = submission.images ? [...submission.images] : [];
-			this.editor.pendingImageLinks = submission.imageLinks ? [...submission.imageLinks] : [];
+			// Enter clears the submitted draft before this cancellation can run.
+			// Keep anything typed or attached since then, after the recovered input.
+			const laterText = this.editor.getExpandedText();
+			const submittedImages = submission.images ?? [];
+			const laterImages = this.editor.pendingImages;
+			const recoveredText = laterText
+				? `${submission.text}\n${shiftImageMarkers(laterText, submittedImages.length)}`
+				: submission.text;
+			this.editor.pendingImages = [...submittedImages, ...laterImages];
+			this.editor.pendingImageLinks = [
+				...(submission.imageLinks ?? submittedImages.map(() => undefined)),
+				...this.editor.pendingImageLinks,
+			];
 			this.editor.imageLinks = this.editor.pendingImageLinks;
 			this.rebuildChatFromMessages();
-			this.editor.setText(submission.text);
+			this.editor.setCollapsedText(recoveredText);
 		}
 		this.updateEditorBorderColor();
 		this.ui.requestRender();
@@ -3087,8 +3117,9 @@ export class InteractiveMode implements InteractiveModeContext {
 	}
 
 	/**
-	 * Cache placeholder-only status chrome so the next launch paints the row
-	 * immediately without presenting values from the previous session.
+	 * Cache status chrome so the next launch paints the row immediately: project
+	 * values (model, path, branch) filled in, session values from this session
+	 * elided, plus a fully elided fallback for when HEAD moves before relaunch.
 	 */
 	#persistComposerStatus(): void {
 		if (!this.sessionManager.getSessionFile()) return;
@@ -3096,30 +3127,37 @@ export class InteractiveMode implements InteractiveModeContext {
 		const style = getComposerStyle(shape);
 		const terminalWidth = this.ui.terminal.columns;
 		const availableWidth = this.editor.getTopBorderAvailableWidth(terminalWidth);
-		const topContent =
-			style.statusAttachment === "top-border"
-				? this.statusLine.renderStartupPlaceholder(availableWidth, "box")
-				: style.statusAttachment === "top-band"
-					? this.statusLine.renderStartupPlaceholder(availableWidth, "band")
-					: style.statusAttachment === "top-rule-chip"
-						? this.statusLine.renderStartupPlaceholder(availableWidth, "plain-right")
-						: undefined;
-		const bottomLines: string[] = [];
-		if (style.bottomBar !== "none") {
-			const content = this.statusLine.renderStartupPlaceholder(
-				terminalWidth,
-				style.bottomBar === "left" ? "plain-left" : "plain-full",
-			);
-			if (content) {
-				if (style.bottomBarGap) bottomLines.push("");
-				bottomLines.push(content);
+		const renderChrome = (scope: StartupPlaceholderScope): ComposerStatusChrome => {
+			const topContent =
+				style.statusAttachment === "top-border"
+					? this.statusLine.renderStartupPlaceholder(availableWidth, "box", scope)
+					: style.statusAttachment === "top-band"
+						? this.statusLine.renderStartupPlaceholder(availableWidth, "band", scope)
+						: style.statusAttachment === "top-rule-chip"
+							? this.statusLine.renderStartupPlaceholder(availableWidth, "plain-right", scope)
+							: undefined;
+			const bottomLines: string[] = [];
+			if (style.bottomBar !== "none") {
+				const content = this.statusLine.renderStartupPlaceholder(
+					terminalWidth,
+					style.bottomBar === "left" ? "plain-left" : "plain-full",
+					scope,
+				);
+				if (content) {
+					if (style.bottomBarGap) bottomLines.push("");
+					bottomLines.push(content);
+				}
 			}
-		}
+			return {
+				topBorder: topContent ? { content: topContent, width: visibleWidth(topContent) } : undefined,
+				bottomLines,
+			};
+		};
 		// Recover the border's ANSI wrapper by coloring a sentinel and splitting around it.
 		const marker = "\0";
 		const colored = this.editor.borderColor(marker);
 		const markerIndex = colored.indexOf(marker);
-		const snapshot: ComposerStatusSnapshot = {
+		const status: ComposerStatusCache = {
 			shape,
 			borderColor:
 				markerIndex < 0
@@ -3128,10 +3166,10 @@ export class InteractiveMode implements InteractiveModeContext {
 							prefix: colored.slice(0, markerIndex),
 							suffix: colored.slice(markerIndex + marker.length),
 						},
-			topBorder: topContent ? { content: topContent, width: visibleWidth(topContent) } : undefined,
-			bottomLines,
+			project: renderChrome("session"),
+			placeholder: renderChrome("all"),
 		};
-		void writeComposerStatusCache(this.sessionManager.getCwd(), snapshot).catch(error => {
+		void writeComposerStatusCache(this.sessionManager.getCwd(), status).catch(error => {
 			logger.debug("composer status cache write failed", { error });
 		});
 	}
@@ -6097,7 +6135,8 @@ export class InteractiveMode implements InteractiveModeContext {
 		// #resumableSessionId).
 		const sessionId = this.#resumableSessionId();
 		if (sessionId) {
-			process.stderr.write(`\n${chalk.dim(`Resume this session with ${resumeCommand(sessionId)}`)}\n`);
+			// Command on its own line so triple-click selects just the command (#11001).
+			process.stderr.write(`\n${chalk.dim("Resume this session with")}\n${chalk.dim(resumeCommand(sessionId))}\n`);
 		}
 
 		await postmortem.quit(0);
@@ -6538,7 +6577,10 @@ export class InteractiveMode implements InteractiveModeContext {
 	#buildConfigWarningComponents(): Component[] {
 		const components: Component[] = [];
 		for (const warning of this.session.configWarnings) {
-			components.push(new Text(theme.fg("warning", `Warning: ${warning}`), 1, 0), new Spacer(1));
+			components.push(
+				new Text(`Warning: ${warning}`, 1, 0).setStyleFn(t => theme.fg("warning", t)),
+				new Spacer(1),
+			);
 		}
 		return components;
 	}

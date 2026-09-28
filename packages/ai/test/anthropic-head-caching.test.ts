@@ -642,6 +642,34 @@ describe("anthropic head caching (general API-key path)", () => {
 		expect(stableText(after)).toEqual(stableText(before));
 	});
 
+	it("spends the OAuth system breakpoint on the last system block without taking one from the messages", async () => {
+		const oAuthModel = buildModel({ ...MODEL_SPEC, id: "claude-opus-5", name: "Claude Opus 5" });
+		const { body } = await captureTurn(
+			oAuthModel,
+			{
+				systemPrompt: ["You are helpful.", "Follow the house style."],
+				messages: [
+					{ role: "user", content: "hello", timestamp: 1 },
+					assistantMessage("hi there", 2),
+					{ role: "user", content: "again", timestamp: 3 },
+				],
+				tools: CONTEXT.tools,
+			},
+			"sess-oauth-anchor",
+		);
+		// 2 OAuth identity blocks + 2 caller prompt blocks. The only system
+		// breakpoint is on the last block, so a message-prefix miss still reads
+		// tools + the whole system prompt from cache.
+		const system = textSystemBlocks(body);
+		const cachedSystem = system
+			.map((block, index) => ("cache_control" in block && block.cache_control != null ? index : -1))
+			.filter(index => index >= 0);
+		expect(cachedSystem).toEqual([system.length - 1]);
+		// The move keeps the head at tool + system, so both rolling message
+		// breakpoints survive.
+		expect(findCachedMessageIndices(body)).toEqual([1, 2]);
+	});
+
 	it("falls back to tail anchoring when every system block is volatile", async () => {
 		const body = await captureWireBody(undefined, {
 			systemPrompt: ["<memories>\nonly recall\n</memories>"],

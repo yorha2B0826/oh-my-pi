@@ -42,6 +42,7 @@ import { getSeparator } from "./separators";
 import type {
 	CollabStatus,
 	EffectiveStatusLineSettings,
+	StartupPlaceholderScope,
 	StatusLineSegmentId,
 	StatusLineSegmentOptions,
 	StatusLineSettings,
@@ -312,7 +313,7 @@ interface CachedStatusLine {
 	availableWidth: number;
 	renderRevision: number;
 	inputRevision: number;
-	placeholders: boolean;
+	placeholders: StartupPlaceholderScope | undefined;
 	previewTitle: string | undefined;
 	externalInputs: StatusLineExternalInputs;
 }
@@ -2439,7 +2440,11 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	 * clocks, countdowns, and VCS fallback polling advance only at their own
 	 * display/probe cadence.
 	 */
-	#statusLineClock(nowMs: number, effectiveSettings: EffectiveStatusLineSettings, placeholders: boolean): number {
+	#statusLineClock(
+		nowMs: number,
+		effectiveSettings: EffectiveStatusLineSettings,
+		placeholders: StartupPlaceholderScope | undefined,
+	): number {
 		if (placeholders) return 0;
 		const leftSegments = effectiveSettings.leftSegments;
 		const rightSegments = effectiveSettings.rightSegments;
@@ -2473,10 +2478,10 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		width: number,
 		layout: StatusLineLayout = "box",
 		previewTitle?: string,
-		options?: { readonly placeholders?: boolean },
+		options?: { readonly placeholders?: StartupPlaceholderScope },
 	): CachedStatusLine {
 		const effectiveSettings = this.#resolveSettings();
-		const placeholders = options?.placeholders === true;
+		const placeholders = options?.placeholders;
 		const externalInputs = this.#readStatusLineExternalInputs();
 		const nowMs = Date.now();
 		const clockTick = this.#statusLineClock(nowMs, effectiveSettings, placeholders);
@@ -2533,12 +2538,12 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		width: number,
 		layout: StatusLineLayout,
 		previewTitle: string | undefined,
-		options: { readonly placeholders?: boolean } | undefined,
+		options: { readonly placeholders?: StartupPlaceholderScope } | undefined,
 		nowMs: number,
 	): string {
 		const effectiveSettings = this.#resolveSettings();
 		this.#syncPricingTimer();
-		const placeholders = options?.placeholders === true;
+		const placeholders = options?.placeholders;
 		const plain = layout !== "box" && layout !== "band";
 		const includePath =
 			hasPathSegment(effectiveSettings.leftSegments) || hasPathSegment(effectiveSettings.rightSegments);
@@ -2557,7 +2562,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			nowMs,
 			previewTitle,
 		);
-		const ctx: SegmentContext = placeholders ? { ...liveCtx, startupPlaceholder: true } : liveCtx;
+		const ctx: SegmentContext = placeholders ? { ...liveCtx, startupPlaceholder: placeholders } : liveCtx;
 		const separatorDef = plain
 			? { left: "·", right: "·" }
 			: getSeparator(effectiveSettings.separator ?? "powerline-thin", theme);
@@ -2619,7 +2624,9 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			removeContextSegments(rightParts, rightSegIds);
 		}
 
-		if (layout !== "plain-left") {
+		// A fresh process has no background jobs or subagents, so startup
+		// placeholders omit both badges.
+		if (layout !== "plain-left" && !placeholders) {
 			// Count task jobs only until their AgentRegistry ref appears. Once it is
 			// running, the subagent badge represents that same agent; bash and eval
 			// jobs always remain independent background work.
@@ -2630,13 +2637,9 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 						job => job.type !== "task" || job.agentId === undefined || !this.#runningSubagentIds.has(job.agentId),
 					).length ?? 0;
 			if (runningBackgroundJobs > 0) {
-				const count = placeholders ? "…" : `${runningBackgroundJobs}`;
-				rightParts.unshift(theme.fg("statusLineSubagents", `${theme.icon.job} ${count}`));
+				rightParts.unshift(theme.fg("statusLineSubagents", `${theme.icon.job} ${runningBackgroundJobs}`));
 			}
-			if (subagentBadge) {
-				const content = placeholders ? [theme.icon.agents, "…"].filter(Boolean).join(" ") : subagentBadge;
-				rightParts.unshift(placeholders ? theme.fg("statusLineSubagents", content) : content);
-			}
+			if (subagentBadge) rightParts.unshift(subagentBadge);
 		}
 		const topFillWidth = Math.max(0, width);
 		const left = [...leftParts];
@@ -2669,7 +2672,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		// context segment is gone, and the gauge silently omits its labels too.
 		const embeddedContextWidth = embedContext
 			? ctx.startupPlaceholder
-				? "…%".length + "…".length + 4
+				? "…%".length + (ctx.startupPlaceholder === "all" ? 1 : formatNumber(ctx.contextWindow).length) + 4
 				: embeddedContextGaugeMinWidth(ctx.contextPercent ?? 0, ctx.contextWindow)
 			: 0;
 		const minimumGapWidth = (): number => {
@@ -2828,7 +2831,8 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			return `\x1b[49m${usedColor}${horizontal.repeat(gapWidth)}\x1b[39m`;
 		}
 
-		const clampedPct = Math.min(100, Math.max(0, pct));
+		// Startup placeholders stand in for a fresh session: one lit cell, no overflow.
+		const clampedPct = ctx.startupPlaceholder ? 0 : Math.min(100, Math.max(0, pct));
 		let percentLabel = "";
 		let windowLabel = "";
 		let percentStart = -1;
@@ -2837,12 +2841,12 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		// >100%: usage anchored past the active window (e.g. model switch to a
 		// smaller window). The bar clamps full, but the embedded label breaks
 		// past the window label — `──200K─120%` with the percent in error color.
-		const percentOverflow = pct > 100;
+		const percentOverflow = !ctx.startupPlaceholder && pct > 100;
 		if (embedContext) {
 			const candidatePercent = ctx.startupPlaceholder
 				? "…%"
 				: formatEmbeddedContextPercent(percentOverflow ? pct : clampedPct);
-			const candidateWindow = ctx.startupPlaceholder ? "…" : formatNumber(ctx.contextWindow);
+			const candidateWindow = ctx.startupPlaceholder === "all" ? "…" : formatNumber(ctx.contextWindow);
 			const minimumLabelWidth = candidatePercent.length + candidateWindow.length + 4;
 			if (gapWidth >= minimumLabelWidth) {
 				percentLabel = candidatePercent;
@@ -2946,9 +2950,9 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		}
 	}
 
-	/** Render startup ellipses inside each segment's normal icon, color, and static chrome. */
-	renderStartupPlaceholder(width: number, layout: StatusLineLayout): string {
-		return this.#buildStatusLine(width, layout, undefined, { placeholders: true }).content;
+	/** Render startup ellipses for `scope` inside each segment's normal icon, color, and static chrome. */
+	renderStartupPlaceholder(width: number, layout: StatusLineLayout, scope: StartupPlaceholderScope): string {
+		return this.#buildStatusLine(width, layout, undefined, { placeholders: scope }).content;
 	}
 
 	getTopBorder(width: number, previewTitle?: string): { content: string; width: number; revision: number } {

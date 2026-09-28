@@ -82,6 +82,7 @@ function createMockSession(
 			return true;
 		},
 		getLastAssistantMessage: () => state.messages[state.messages.length - 1],
+		hasPendingAsyncWork: () => false,
 	};
 
 	return session as unknown as AgentSession;
