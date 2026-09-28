@@ -15,7 +15,10 @@
 
 ### Fixed
 
+- Fixed Anthropic accounts remaining blocked after quota resets, including broker-connected clients, without lifting independent authentication or exhausted model limits
+- Fixed concurrent usage refreshes repeatedly bypassing failed-probe cooldowns and flooding provider usage endpoints
 - Fixed Gemini and Antigravity responses reporting negative input tokens and negative cost when upstream omitted `promptTokenCount` or reported more cached tokens than the prompt
+- Fixed a 401 on a stored credential giving up after one sibling switch, so a valid stored API key or account was never tried when two or more stale siblings existed; 401s now rotate through every distinct sibling ([#13555](https://github.com/can1357/oh-my-pi/issues/13555))
 - Fixed native judge responses without token counts producing non-finite usage and cost ([#13490](https://github.com/can1357/oh-my-pi/issues/13490)).
 - Fixed credential rotation failing with a drained account's multi-hour quota error when a healthy sibling was blocked for only a few seconds (such as a Cloud Code Assist capacity 429); rotation now waits out sibling blocks of up to 5 seconds, abortable via `signal`, and retries the freed credential ([#13270](https://github.com/can1357/oh-my-pi/issues/13270))
 - Fixed Cursor turn usage and cost reporting only streamed output tokens; turns now use Cursor's final input, cache-read, cache-write, and reasoning counters ([#13082](https://github.com/can1357/oh-my-pi/issues/13082))
@@ -24,6 +27,9 @@
 - Fixed Cursor shell tool calls showing their millisecond timeout as seconds (15000 instead of 15) in the transcript ([#13082](https://github.com/can1357/oh-my-pi/issues/13082))
 - Fixed unix-socket fetches failing when `PI_PROXY` is set ([#13505](https://github.com/can1357/oh-my-pi/issues/13505)).
 - Fixed Ollama chat turns recording zero cost; usage is now priced from the model's cost card ([#13056](https://github.com/can1357/oh-my-pi/issues/13056)).
+### Fixed
+
+- Fixed Anthropic requests failing with "`compaction` block must be sent first" when a per-message effort change was recorded on the turn right after a native compaction; the effort control now follows the compaction block ([#13569](https://github.com/can1357/oh-my-pi/pull/13569) by [@H4vC](https://github.com/H4vC))
 
 ## [18.3.5] - 2026-09-27
 
