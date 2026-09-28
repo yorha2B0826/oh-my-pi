@@ -2,12 +2,15 @@
 
 ## [Unreleased]
 
+## [18.4.1] - 2026-09-28
+
 ### Breaking Changes
 
 - Replaced `AgentsHubDeps.setDisabledAgents`/`setOverrides` with `setAgentDisabled(name, { disabled })` and `setAgentOverride(property, name, value)`, so each hub edit persists only the agent it changes; `PropertyKind` is exported ([#13308](https://github.com/can1357/oh-my-pi/pull/13308) by [@Vortex727](https://github.com/Vortex727))
 
 ### Changed
 
+- LSP servers section is omitted from the welcome screen when LSP is disabled
 - Usage dashboards and provider cards can show connected accounts with unavailable usage separately from reported quotas, without treating missing reports as unused or unlimited ([#13476](https://github.com/can1357/oh-my-pi/pull/13476) by [@aktanazat](https://github.com/aktanazat)).
 
 ### Fixed
