@@ -85,6 +85,23 @@ async function fatalMoveFailure(text: string, runtime: SlashCommandRuntime): Pro
 	return commandConsumed();
 }
 
+/** A move rollback failed: re-align the workspace to wherever the session ended up and report it. */
+async function reportFailedRollback(runtime: SlashCommandRuntime, rollbackError: unknown): Promise<SlashCommandResult> {
+	const actual = runtime.sessionManager.getCwd();
+	try {
+		await rescopeHeadlessToCwd(runtime, actual);
+	} catch {
+		return fatalMoveFailure(
+			`Move failed and rollback failed: ${errorMessage(rollbackError)} (failed to re-align workspace to ${actual}; process remains at source while session is at ${actual})`,
+			runtime,
+		);
+	}
+	return usage(
+		`Move failed and rollback failed: ${errorMessage(rollbackError)} (workspace remains at ${actual})`,
+		runtime,
+	);
+}
+
 /**
  * Relocate the headless session to `resolvedPath` (an existing directory):
  * flush settings, move the session file, re-scope the process, rolling back
@@ -112,22 +129,7 @@ async function relocateHeadlessSession(
 		try {
 			await runtime.sessionManager.rollbackMove(previousState);
 		} catch (rollbackError) {
-			const actual = runtime.sessionManager.getCwd();
-			let realigned = false;
-			try {
-				await rescopeHeadlessToCwd(runtime, actual);
-				realigned = true;
-			} catch {}
-			if (!realigned) {
-				return fatalMoveFailure(
-					`Move failed and rollback failed: ${errorMessage(rollbackError)} (failed to re-align workspace to ${actual}; process remains at source while session is at ${actual})`,
-					runtime,
-				);
-			}
-			return usage(
-				`Move failed and rollback failed: ${errorMessage(rollbackError)} (workspace remains at ${actual})`,
-				runtime,
-			);
+			return reportFailedRollback(runtime, rollbackError);
 		}
 		return usage(`Move failed: ${errorMessage(err)}`, runtime);
 	}
@@ -138,22 +140,7 @@ async function relocateHeadlessSession(
 			await runtime.sessionManager.rollbackMove(previousState);
 			await rescopeHeadlessToCwd(runtime, previousState.cwd);
 		} catch (rollbackError) {
-			const actual = runtime.sessionManager.getCwd();
-			let realigned = false;
-			try {
-				await rescopeHeadlessToCwd(runtime, actual);
-				realigned = true;
-			} catch {}
-			if (!realigned) {
-				return fatalMoveFailure(
-					`Move failed and rollback failed: ${errorMessage(rollbackError)} (failed to re-align workspace to ${actual}; process remains at source while session is at ${actual})`,
-					runtime,
-				);
-			}
-			return usage(
-				`Move failed and rollback failed: ${errorMessage(rollbackError)} (workspace remains at ${actual})`,
-				runtime,
-			);
+			return reportFailedRollback(runtime, rollbackError);
 		}
 		return usage(`Move failed: ${errorMessage(err)}`, runtime);
 	}
