@@ -54,7 +54,11 @@ import { defaultLoadModeForToolName } from "../../tools/essential-tools";
 import type { EventBus } from "../../utils/event-bus";
 import { selectRpcEntries } from "./rpc-compat";
 import { calculateTokensPerSecond } from "../../utils/token-rate";
-import { formatPersistenceDurabilityFailure, formatPersistenceFailure } from "../persistence-failure";
+import {
+	formatPersistenceDurabilityFailure,
+	formatPersistenceFailure,
+	formatPersistenceNotice,
+} from "../persistence-failure";
 import { initializeExtensions } from "../runtime-init";
 import { cfgSpellingAutocomplete } from "../settings";
 import { isRpcHostToolResult, isRpcHostToolUpdate, RpcHostToolBridge } from "./host-tools";
@@ -1057,19 +1061,29 @@ export function applyRpcQueueModeCommand(session: AgentSession, command: RpcQueu
  * `close()` would have no subscriber left to forward it and the client would
  * see a nonzero exit with no notice at all. `onFailure` records the failure for
  * the mode's own teardown attribution: a failure still latched at dispose is
- * what makes `session.dispose()` reject.
+ * what makes `session.dispose()` reject. Persistence notices (saving
+ * continues) go out the same way as `warning` frames.
  */
 export function registerRpcPersistenceSurface(
 	session: Pick<AgentSession, "sessionManager">,
 	output: (frame: object) => void,
 	onFailure?: (error: Error) => void,
 ): () => void {
-	return session.sessionManager.onPersistenceError(error => {
+	const unsubscribeNotices = session.sessionManager.onPersistenceNotice(notice => {
+		const message = formatPersistenceNotice(notice);
+		output({ type: "notice", level: "warning", message, source: "session-persistence" });
+		process.stderr.write(`${message}\n`);
+	});
+	const unsubscribeFailures = session.sessionManager.onPersistenceError(error => {
 		onFailure?.(error);
 		const message = formatPersistenceFailure(error.message);
 		output({ type: "notice", level: "error", message, source: "session-persistence" });
 		process.stderr.write(`${message}\n`);
 	});
+	return () => {
+		unsubscribeNotices();
+		unsubscribeFailures();
+	};
 }
 
 /** Startup options for {@link runRpcMode}. */
