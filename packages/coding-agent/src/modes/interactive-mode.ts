@@ -7076,9 +7076,12 @@ export class InteractiveMode implements InteractiveModeContext {
 	 * which is why the earlier `showStatus` acknowledgment was reverted. An
 	 * anchored container is cleared and rebuilt in place without adding history
 	 * rows — the same reason the ctrl+p role-cycle track lives there.
+	 *
+	 * A Tern Surface Protocol surface has no append-only scrollback to
+	 * duplicate into, so there the panel mounts in the transcript at once.
 	 */
 	presentCommandOutput(content: Component | readonly Component[]): void {
-		if (!this.session.isStreaming) {
+		if (!this.session.isStreaming || this.ui.nativeRendering) {
 			this.present(content);
 			return;
 		}
@@ -7211,7 +7214,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	showPinnedError(message: string): void {
 		this.#dismissPlanReview();
 		this.errorBannerContainer.clear();
-		this.errorBannerContainer.addChild(new ErrorBannerComponent(message));
+		this.errorBannerContainer.addChild(new ErrorBannerComponent(message, () => this.clearPinnedError()));
 		this.ui.requestRender();
 	}
 
