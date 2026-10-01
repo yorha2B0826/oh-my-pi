@@ -2,26 +2,35 @@
 
 ## [Unreleased]
 
+## [18.4.9] - 2026-10-01
+
 ### Added
 
-- Added the RPC `cancel_subagent` command (and `RpcClient.cancelSubagent()`) to hard-kill one running subagent, foreground or background, without aborting the session ([#13481](https://github.com/can1357/oh-my-pi/pull/13481) by [@andrebrait](https://github.com/andrebrait)); supersedes [#8666](https://github.com/can1357/oh-my-pi/pull/8666) by [@13kparkin](https://github.com/13kparkin)
-- Added the RPC `steer_subagent` command (and `RpcClient.steerSubagent()`) to message a running subagent as its user, like Agent Hub chat ([#13482](https://github.com/can1357/oh-my-pi/pull/13482) by [@andrebrait](https://github.com/andrebrait)); ported from [#10427](https://github.com/can1357/oh-my-pi/pull/10427) by [@agenticfreedom](https://github.com/agenticfreedom)
-- Added `predict_word` and `predict_word_feedback` RPC commands so hosts with their own composer (web and IDE clients) can show the same ghost-text word completion as the terminal editor, using the `spelling.autocomplete` engine and its prose gates ([#13517](https://github.com/can1357/oh-my-pi/pull/13517) by [@andrebrait](https://github.com/andrebrait))
-- Added an opt-in RPC ask dialog: after `set_ask_dialog` enables it, the `ask` tool sends all its questions in one `ask` extension UI request and takes the answers back in one `answers` response, so hosts can render every question with checkboxes or radio buttons and submit them together; hosts that don't opt in keep the one-`select`-per-choice prompts ([#13551](https://github.com/can1357/oh-my-pi/pull/13551) by [@andrebrait](https://github.com/andrebrait))
+- Added opt-in stale-session garbage collection with `omp gc --stale` or `gc.stale`, removing orphaned session markers and terminal breadcrumbs and expiring old debug reports and collaboration replicas according to configurable retention limits.
+- Added RPC controls to cancel or steer individual foreground and background subagents without aborting the session.
+- Added RPC word-completion commands so web and IDE hosts can provide the same ghost-text completion available in the terminal editor.
+- Added an opt-in RPC ask-dialog mode that lets hosts render all questions together with checkbox or radio-button controls and submit their answers in one response.
+- Added SDK notifications when a session moves to a new persistence file, including the previous and new paths.
+- Added SDK APIs to inspect and cancel background jobs, including their command, working directory, process IDs, exit status, and captured output.
 
 ### Changed
 
-- RPC mode now sends a `cancel` extension UI request (with `targetId`) when omp's own dialog timeout elapses, for `select`, `confirm`, `input`, and `ask` dialogs, so hosts can close stale dialogs ([#13551](https://github.com/can1357/oh-my-pi/pull/13551) by [@andrebrait](https://github.com/andrebrait))
+- Improved the `omp predict` comparison view with an interactive native interface, table rows, action controls, and clearer status information.
+- Improved MCP authorization prompts with clickable links, native copy/open context menus, and a clearer URL layout.
+- RPC hosts are now notified when omp cancels an expired `select`, `confirm`, `input`, or `ask` dialog, allowing stale UI prompts to be closed.
+- Limited saved bash, Python, and JavaScript evaluation output artifacts to 16 MB by default while preserving both the beginning and latest output; configure the limit with `tools.artifactMaxBytes`, or set it to `0` for unlimited output.
 
 ### Fixed
 
-- Fixed `/wt` on filesystems without copy-on-write cloning (e.g. NTFS): the new worktree no longer lists unchanged files as modified under `core.autocrlf`, and staged-only edits, additions, and deletions now carry over with the right file contents instead of reverting to `HEAD` ([#13987](https://github.com/can1357/oh-my-pi/pull/13987) by [@H4vC](https://github.com/H4vC))
-- Fixed Ctrl+V on Windows taking about a second to paste text: omp no longer starts PowerShell to check for an image or read the text, and only uses it when the built-in clipboard read fails ([#13991](https://github.com/can1357/oh-my-pi/pull/13991) by [@H4vC](https://github.com/H4vC))
-- Fixed `local://` paths written with the working directory in front (`/repo/local://notes.md`) creating a literal `local:` directory in the project; `read`, `write`, and search tools now treat them as the `local://` URL ([#13977](https://github.com/can1357/oh-my-pi/pull/13977) by [@radkawar](https://github.com/radkawar))
-- Fixed `read` with a `;` list that mixes URLs and local paths (`https://…;src/a.ts:1-20`, `omp://;Makefile:1-3`) or starts with an extensionless file and a selector (`Makefile:1-3;docs/x.md`): it was fetched as one URL or sent to MCP; each entry is now read separately ([#13979](https://github.com/can1357/oh-my-pi/pull/13979) by [@radkawar](https://github.com/radkawar))
-- Fixed session saves rewriting every already-stored image blob on each save, which multiplied disk writes on sessions with many images ([#13989](https://github.com/can1357/oh-my-pi/pull/13989) by [@radkawar](https://github.com/radkawar))
-- Fixed omp freezing for seconds at a time and silently no longer saving the session after another omp process wrote to the same session file; omp now stops retrying, leaves the other process's file untouched, and tells you this session's further changes are not being saved to it ([#13989](https://github.com/can1357/oh-my-pi/pull/13989) by [@radkawar](https://github.com/radkawar))
-- Fixed writing to a session that another running omp process already has open giving no sign that both write to the same file; omp now warns once when it first writes to it ([#13989](https://github.com/can1357/oh-my-pi/pull/13989) by [@radkawar](https://github.com/radkawar))
+- Fixed `/wt` on filesystems without copy-on-write cloning, including NTFS, so unchanged files are not incorrectly marked modified and staged edits, additions, and deletions retain the correct contents.
+- Fixed Windows Ctrl+V taking about a second to paste by avoiding unnecessary PowerShell clipboard checks.
+- Fixed `local://` paths being misinterpreted as local filesystem paths by the `read`, `write`, and search tools.
+- Fixed `read` handling of semicolon-separated URLs, local paths, and line selectors so each entry is processed independently.
+- Fixed session persistence conflicts between multiple omp processes, preventing lost or interleaved turns and continuing in a new session file when necessary.
+- Fixed session image handling to avoid unnecessary rewrites, preserve images after interrupted writes, and prevent garbage collection from removing images that are referenced again.
+- Reduced unnecessary disk writes and improved persistence efficiency across sessions, model data, configuration, and background jobs.
+- Fixed the native composer showing the main session's effort level instead of the selected subagent's level.
+- Fixed the `omp predict` comparison view and MCP authorization prompt rendering with their full native interfaces, including clickable link actions.
 
 ## [18.4.6] - 2026-10-01
 
@@ -3107,3 +3116,4 @@ Older entries are archived in [packages/coding-agent/CHANGELOG.md@9856625e0aa1](
 Older entries are archived in [packages\coding-agent\CHANGELOG.md@07e9197a3012](https://github.com/can1357/oh-my-pi/blob/07e9197a3012f58c459f1faabeb324decc21f41d/packages\coding-agent\CHANGELOG.md).
 Older entries are archived in [packages\coding-agent\CHANGELOG.md@7057eb9cdda9](https://github.com/can1357/oh-my-pi/blob/7057eb9cdda91791fc4fbce4a60f33139bda3b8b/packages\coding-agent\CHANGELOG.md).
 Older entries are archived in [packages/coding-agent/CHANGELOG.md@ddf916838520](https://github.com/can1357/oh-my-pi/blob/ddf916838520312aeee0448e398e108934a8b02a/packages/coding-agent/CHANGELOG.md).
+Older entries are archived in [packages/coding-agent/CHANGELOG.md@06ca9883f7fd](https://github.com/can1357/oh-my-pi/blob/06ca9883f7fd9704932363a259eb2ed5f311bcbb/packages/coding-agent/CHANGELOG.md).
