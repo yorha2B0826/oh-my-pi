@@ -2,19 +2,24 @@
 
 ## [Unreleased]
 
+## [18.4.11] - 2026-10-02
+
 ### Added
 
-- Added periodic completion estimates for running subagents: every 2 minutes each working subagent is asked, through a cached `/btw`-style side request, how far along it is, and the `XY%` shows next to it in wait and task views. Each check sees the subagent's previous estimate and any tool call it is still writing, so long file writes no longer read as 0%. Set the interval or turn it off with `task.completionProbeMs`.
-- Added a `goal` command for RPC hosts (`--mode rpc` and `rpc-ui`) to create, read, pause, resume and drop goals, the current goal in `get_state`, and opt-in automatic goal continuation with `goal.continuationModes: ["rpc"]` ([#13952](https://github.com/can1357/oh-my-pi/pull/13952) by [@shawnkoh](https://github.com/shawnkoh))
-- Added `--goal <objective>` for interactive launches: it starts a fresh session in goal mode and begins working on the objective immediately, without typing `/goal` ([#13879](https://github.com/can1357/oh-my-pi/pull/13879) by [@shawnkoh](https://github.com/shawnkoh))
+- Added goal management for RPC hosts and optional automatic goal continuation via `goal.continuationModes: ["rpc"]`. RPC clients can create, inspect, pause, resume, and remove goals, and view the current goal in `get_state`.
+- Added `--goal <objective>` for interactive launches to begin a new session in goal mode without requiring the `/goal` command.
+- Added periodic completion estimates for running subagents, with configurable polling through `task.completionProbeMs` and progress displayed in wait and task views.
+- Added the RPC `fork` command (`RpcClient.fork(entryId?)`, Python `fork(entry_id=None)`): it moves an RPC session onto a new session file holding the history up to and including any message entry (and the tool results answering a cut tool-call batch), together with the session's artifacts, or a copy of the whole session when `entryId` is omitted ([#14077](https://github.com/can1357/oh-my-pi/pull/14077) by [@andrebrait](https://github.com/andrebrait)).
+- Added `reason` (`"branch"`, `"fork"` or `"btw"`) to the `session_before_branch` and `session_branch` extension and hook events, so handlers can tell whether `entryId` is dropped (`branch`) or kept ([#14077](https://github.com/can1357/oh-my-pi/pull/14077) by [@andrebrait](https://github.com/andrebrait)).
 
 ### Fixed
 
-- Fixed the skill descriptions database and text-predict engine state ignoring XDG directories; with XDG enabled they now live under `$XDG_DATA_HOME/omp`, and an existing cache and learned prediction state are carried over on first use ([#13648](https://github.com/can1357/oh-my-pi/pull/13648) by [@Parsifa1](https://github.com/Parsifa1))
-- Subagent MCP calls now honor the parent transport's configured deadline, including `OMP_MCP_TIMEOUT_MS` and `timeout: 0`, instead of discarding long-running results at an independent 60-second proxy timeout ([#13862](https://github.com/can1357/oh-my-pi/pull/13862) by [@NikkeTryHard](https://github.com/NikkeTryHard)).
-- Fixed a fresh setup with no model configured failing its first turn with "Thinking effort high is not supported" when the auto-picked provider default has no effort levels (e.g. Devin's `swe-1-6`); the default thinking level is now fitted to the picked model ([#13657](https://github.com/can1357/oh-my-pi/pull/13657) by [@will-bogusz](https://github.com/will-bogusz))
-- Fixed the `read` tool hanging, and the TUI ignoring every keystroke, when reading `/dev/stdin`, a FIFO, or another non-regular file; such paths are now rejected ([#13585](https://github.com/can1357/oh-my-pi/pull/13585) by [@DrFaustus-vic](https://github.com/DrFaustus-vic))
-- Fixed `~/.omp` being loaded as a project config directory for any non-repository cwd under home (including Windows `%TEMP%` workdirs), which applied the user's `SYSTEM.md`, `RULES.md` and `AGENTS.md` as project config and bypassed `PI_CODING_AGENT_DIR` and profiles ([#14084](https://github.com/can1357/oh-my-pi/pull/14084) by [@NaC-L](https://github.com/NaC-L)).
+- Fixed skill-description and text-prediction data not respecting XDG directories; existing data is now migrated to `$XDG_DATA_HOME/omp` when applicable.
+- Fixed subagent MCP calls ignoring the parent transport timeout, including configured `OMP_MCP_TIMEOUT_MS` and unlimited (`timeout: 0`) settings.
+- Fixed fresh setups failing on the first turn when the automatically selected model did not support the configured thinking level.
+- Fixed the `read` tool hanging and the TUI becoming unresponsive when asked to read standard input, FIFOs, or other non-regular files; these paths are now rejected.
+- Fixed project configuration from `~/.omp` being incorrectly applied to unrelated working directories under the user's home directory.
+- Fixed `omp update` failing on standalone-binary installs when npm advertised a version whose GitHub release was never published; the updater now installs the newest published release instead ([#12913](https://github.com/can1357/oh-my-pi/issues/12913)).
 
 ## [18.4.10] - 2026-10-02
 
@@ -3173,3 +3178,4 @@ Older entries are archived in [packages\coding-agent\CHANGELOG.md@07e9197a3012](
 Older entries are archived in [packages\coding-agent\CHANGELOG.md@7057eb9cdda9](https://github.com/can1357/oh-my-pi/blob/7057eb9cdda91791fc4fbce4a60f33139bda3b8b/packages\coding-agent\CHANGELOG.md).
 Older entries are archived in [packages/coding-agent/CHANGELOG.md@ddf916838520](https://github.com/can1357/oh-my-pi/blob/ddf916838520312aeee0448e398e108934a8b02a/packages/coding-agent/CHANGELOG.md).
 Older entries are archived in [packages/coding-agent/CHANGELOG.md@06ca9883f7fd](https://github.com/can1357/oh-my-pi/blob/06ca9883f7fd9704932363a259eb2ed5f311bcbb/packages/coding-agent/CHANGELOG.md).
+Older entries are archived in [packages/coding-agent/CHANGELOG.md@14c97b555b20](https://github.com/can1357/oh-my-pi/blob/14c97b555b206231290f46882794c8d8c3c024b1/packages/coding-agent/CHANGELOG.md).
