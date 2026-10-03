@@ -72,7 +72,6 @@ import type { ExtensionUIContext } from "./extensibility/extensions/types";
 import { scheduleMarketplaceAutoUpdate } from "./extensibility/plugins/marketplace-auto-update";
 import { autoConnectIwanOnStartup } from "./iwan/service";
 import { registerDaemonProjectPresence } from "./launch/presence";
-import { discoverStartupLspServers } from "./lsp/servers";
 import type { MCPManager } from "./mcp";
 import type { InteractiveMode } from "./modes/interactive-mode";
 import type { PrintModeOptions } from "./modes/print-mode";
@@ -85,7 +84,6 @@ import { invokeSkillCommandFromText, isKnownSkillCommand } from "./modes/skill-c
 import {
 	applyStartupComposerPreferences,
 	type ComposerLease,
-	setStartupComposerLspServers,
 	stopPendingStartupComposer,
 	takeStartupComposerLease,
 } from "./modes/startup-composer";
@@ -176,7 +174,6 @@ import {
 } from "./session/settings";
 import { cfgDisabledProviders, cfgEnabledModels } from "./config/model-settings";
 import { cfgTaskAgentIdleTtlMs } from "./task/settings";
-import { cfgLspEnabled } from "./lsp/settings";
 import { cfgSkillsIncludeSkills } from "./extensibility/settings";
 import { cfgWorkspaceAdditionalDirectories } from "./session/context-settings";
 
@@ -673,7 +670,6 @@ async function runInteractiveMode(
 				suppressWelcomeIntro: resuming || setupScenes.length > 0 || playStartupSplash,
 				clearInitialTerminalHistory: true,
 				autoStartCollab: joinLink === undefined,
-				recentSessions: startupLease?.recentSessions,
 			}),
 		);
 		startDeferredStartupWork?.();
@@ -1949,9 +1945,6 @@ export async function runRootCommand(
 				lightTheme: cfgThemeLight.get(settingsInstance),
 			},
 		});
-		setStartupComposerLspServers(
-			!parsedArgs.noLsp && cfgLspEnabled.get(settingsInstance) ? discoverStartupLspServers(cwd, "connecting") : null,
-		);
 
 		let scopedModels = await logger.time(
 			"resolveModelScope",
