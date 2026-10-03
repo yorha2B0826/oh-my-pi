@@ -265,9 +265,10 @@ describe("outer startup collaboration gate", () => {
 			vi.restoreAllMocks();
 			uninstallInMemoryRelay();
 			authStorage.close();
+			// setProjectDir chdir'd into tempDir; Windows cannot delete the process cwd.
+			setProjectDir(originalProject);
 			await testSession.cleanup();
 			resetSettingsForTest();
-			setProjectDir(originalProject);
 			Object.defineProperty(process.stdin, "isTTY", { value: originalIsTTY, configurable: true });
 		}
 	});
