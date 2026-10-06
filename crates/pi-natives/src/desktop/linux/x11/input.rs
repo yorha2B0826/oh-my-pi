@@ -172,8 +172,9 @@ impl X11Input {
 						let wm = Wm { conn: &self.conn, root: self.root, atoms: &self.atoms };
 						let result = pointer_mpx(wm, mpx, window, &event);
 						if control::check().is_err() {
-							// Retire cancelled devices, never replay uncertain queued input.
-							// A later explicit operation may create a fresh isolated pair.
+							// Retire cancelled devices, never replay uncertain queued
+							// input. A later explicit operation
+							// may create a fresh isolated pair.
 							self.mpx = None;
 						}
 						return result;
@@ -336,7 +337,7 @@ impl X11Input {
 		let pointer = self.core_pointer();
 		if let Err(error) = self.activate_confirmed(window, ewmh, previous_active, budget) {
 			control::cleanup(|| {
-				self.restore_activation(window, ewmh, previous_active, previous_focus)
+				self.restore_activation(window, ewmh, previous_active, previous_focus);
 			});
 			return Err(error);
 		}
