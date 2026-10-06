@@ -4,7 +4,10 @@
 
 ### Added
 
+- Added Mistral Large 4 with reasoning, image input, a 1M-token context window, and preview pricing ([#14602](https://github.com/can1357/oh-my-pi/pull/14602) by [@PierrunoYT](https://github.com/PierrunoYT)).
 - MiniMax-M3.1-Flash-Preview now offers thinking levels low through max on MiniMax hosts. Like MiniMax M2, it is marked as requiring reasoning effort because the model always thinks: thinking-off and forced-off requests run at the low level ([#13696](https://github.com/can1357/oh-my-pi/pull/13696) by [@eggpeat](https://github.com/eggpeat))
+- Added `RUNNER_API_KINDS` and `runnerApiKind()`, the model kind each single-purpose runner API serves, plus `IMAGE_GENERATION_APIS`, `servedKinds()`, and `apiServesKind()` for the kinds any API can serve; the compat compiler now rejects a provider `kind-apis` entry that lists a runner API under a different kind ([#14483](https://github.com/can1357/oh-my-pi/pull/14483) by [@oshinop](https://github.com/oshinop))
+- Added `Model.kindConfig`, a configured kind that `buildModel` applies over catalog `kind` rules on every rebuild ([#14483](https://github.com/can1357/oh-my-pi/pull/14483) by [@jimhester](https://github.com/jimhester))
 - Added Google Cloud partner-model pricing for Claude Opus 5.5 and Sonnet 5.5 on Google Antigravity ([#14195](https://github.com/can1357/oh-my-pi/pull/14195) by [@eggpeat](https://github.com/eggpeat)).
 
 ### Changed

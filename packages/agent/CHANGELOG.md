@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed aborted context transformations ending the run without emitting the assistant message boundary that subscribers need to persist and recover the interrupted turn ([#14188](https://github.com/can1357/oh-my-pi/pull/14188) by [@schickling-assistant](https://github.com/schickling-assistant)).
+
 ## [18.6.3] - 2026-10-06
 
 ### Breaking Changes

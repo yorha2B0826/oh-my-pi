@@ -313,7 +313,7 @@ export class TurnRecovery {
 		targetSelector: string;
 		handle: AnthropicFallbackCreditHandle;
 	};
-	#usageReserveApprovedSelector: string | undefined;
+	#usageReserveApproval: { model: string; sessionId: string } | undefined;
 	#pendingRetryErrors: PendingRetryError[] = [];
 	#usageLimitOutcomes = new WeakMap<AssistantMessage, Promise<UsageLimitOutcome>>();
 	#emptyStopRetryCount = 0;
@@ -1827,6 +1827,7 @@ export class TurnRecovery {
 		if (!cfgRetryUsageAwareFallback.get(this.#host.settings)) return false;
 		const currentModel = this.#host.model();
 		if (!currentModel) return false;
+		const sessionId = this.#host.sessionManager.getSessionId();
 		const currentSelector = formatRetryFallbackSelector(currentModel, this.#host.thinkingLevel());
 		let health: ModelUsageHealth;
 		try {
@@ -1849,7 +1850,8 @@ export class TurnRecovery {
 		if (signal.aborted || !modelsAreEqual(this.#host.model(), currentModel)) return false;
 		const selectedAccount = health.accounts.find(account => account.selected);
 		if (health.state === "healthy") {
-			this.#usageReserveApprovedSelector = undefined;
+			// A healthy sibling does not end the selected account's reserve episode.
+			if (selectedAccount?.state === "healthy") this.#usageReserveApproval = undefined;
 			if (
 				selectedAccount &&
 				selectedAccount.state !== "healthy" &&
@@ -1859,11 +1861,9 @@ export class TurnRecovery {
 			}
 			return false;
 		}
-		if (health.state === "unknown") {
-			this.#usageReserveApprovedSelector = undefined;
-			return false;
-		}
-		if (health.state !== "reserve") this.#usageReserveApprovedSelector = undefined;
+		// Missing quota data is not evidence that the reserve episode ended.
+		if (health.state === "unknown") return false;
+		if (health.state !== "reserve") this.#usageReserveApproval = undefined;
 
 		const reservePolicy = cfgRetryUsageReservePolicy.get(this.#host.settings);
 		if (reservePolicy === "fail-closed") {
@@ -1875,7 +1875,8 @@ export class TurnRecovery {
 		if (
 			reservePolicy === "confirm" &&
 			health.state === "reserve" &&
-			this.#usageReserveApprovedSelector === currentSelector
+			this.#usageReserveApproval?.sessionId === sessionId &&
+			this.#usageReserveApproval.model === formatModelStringWithRouting(currentModel)
 		) {
 			return false;
 		}
@@ -1959,13 +1960,19 @@ export class TurnRecovery {
 				},
 				signal,
 			);
-			if (signal.aborted || !modelsAreEqual(this.#host.model(), currentModel)) return false;
+			if (
+				signal.aborted ||
+				this.#host.sessionManager.getSessionId() !== sessionId ||
+				!modelsAreEqual(this.#host.model(), currentModel)
+			)
+				return false;
 		}
 		if (!shouldFallback) {
-			this.#usageReserveApprovedSelector = currentSelector;
+			// Auto thinking changes effort between turns, not the coding-plan quota.
+			this.#usageReserveApproval = { model: formatModelStringWithRouting(currentModel), sessionId };
 			return false;
 		}
-		this.#usageReserveApprovedSelector = undefined;
+		this.#usageReserveApproval = undefined;
 		return this.applyRetryFallbackCandidate(fallback.role, fallback.selector, currentSelector, {
 			pinFallback: true,
 			apiKey: fallback.apiKey,

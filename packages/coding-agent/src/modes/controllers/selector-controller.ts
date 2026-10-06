@@ -941,27 +941,31 @@ export class SelectorController {
 							`${scopeLabel}${roleInfo?.tag ?? roleInfo?.name ?? role} role cleared — auto-selection applies`,
 						);
 						// Clearing either persisted scope can also remove a captured
-						// runtime override. When that changes the effective default,
-						// resolve the newly exposed persisted layer and switch the live
-						// session without writing it back to global settings. Overlay
-						// and runtime provenance remain authoritative and session-neutral.
+						// runtime override. When that changes the effective default, or
+						// the live session runs a different model than it (an earlier
+						// in-session pick that a project role shadows), resolve the
+						// exposed persisted layer and switch the live session without
+						// writing it back to global settings. Overlay and runtime
+						// provenance remain authoritative and session-neutral.
 						if (role === "default") {
 							const fallbackRoleValue = this.ctx.settings.getModelRole("default");
 							const fallbackProvenance = this.ctx.settings.getModelRoleProvenance("default");
 							const exposesPersistedFallback =
 								fallbackProvenance === "project" || fallbackProvenance === "global";
-							if (
-								fallbackRoleValue &&
-								fallbackRoleValue !== previousEffectiveRoleValue &&
-								exposesPersistedFallback
-							) {
+							if (fallbackRoleValue && exposesPersistedFallback) {
 								const scopedModels = this.ctx.session.scopedModels.map(sm => sm.model);
 								const availableModels =
 									scopedModels.length > 0 ? scopedModels : this.ctx.session.getAvailableModels();
 								const resolved = resolveModelRoleValue(fallbackRoleValue, availableModels, {
 									settings: this.ctx.settings,
 								});
-								if (resolved.model) {
+								const live = this.ctx.session.model;
+								const liveDiffers =
+									!live ||
+									!resolved.model ||
+									live.provider !== resolved.model.provider ||
+									live.id !== resolved.model.id;
+								if (resolved.model && (fallbackRoleValue !== previousEffectiveRoleValue || liveDiffers)) {
 									const fallbackModel = resolved.model;
 									const isAuto = resolved.thinkingLevel === AUTO_THINKING;
 									let concreteThinking = concreteThinkingLevel(resolved.thinkingLevel);
@@ -991,6 +995,7 @@ export class SelectorController {
 									}
 									this.ctx.statusLine.invalidate();
 									this.ctx.updateEditorBorderColor();
+									this.ctx.showStatus(`Default model: ${fallbackModel.provider}/${fallbackModel.id}`);
 								}
 							}
 						}
