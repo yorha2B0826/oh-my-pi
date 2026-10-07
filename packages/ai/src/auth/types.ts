@@ -894,9 +894,20 @@ export interface KeysApi {
 	 * 4. API key persisted by a successful `/login`
 	 * 5. Environment variable
 	 * 6. Stored API key (e.g. a broker-migrated copy) — last resort, so an explicit env var wins
+	 *
+	 * Resolves `undefined` when no permitted credential can serve, including when
+	 * OAuth refresh failed transiently (network, timeout, 5xx), so availability
+	 * probes move on to their next candidate. Request paths use
+	 * {@link KeysApi.getWithCredential}, which surfaces that failure.
 	 */
 	get(provider: string, sessionId?: string, options?: AuthApiKeyOptions): Promise<string | undefined>;
-	/** Resolve a bearer together with its durable stored credential row id, when known. */
+	/**
+	 * Resolve a bearer together with its durable stored credential row id, when known.
+	 * Same precedence as {@link KeysApi.get}, but rejects with
+	 * `OAuthRefreshUnavailableError` (transient, retryable) when OAuth refresh failed
+	 * with a retryable error and no other permitted source could serve the request;
+	 * the stored credential is kept.
+	 */
 	getWithCredential(
 		provider: string,
 		sessionId?: string,
@@ -1017,9 +1028,11 @@ export interface OAuthApi {
 	 * `enterpriseUrl`). For pure "give me the bytes for `Authorization`"
 	 * scenarios, prefer {@link AuthStorage.keys.get}.
 	 *
-	 * Returns `undefined` when no OAuth credential is available, the
-	 * credential fails to refresh, or runtime/config overrides have replaced
-	 * OAuth with an explicit API key.
+	 * Returns `undefined` when no usable OAuth credential is available (none
+	 * stored, or every one definitively failed to refresh) or runtime/config
+	 * overrides have replaced OAuth with an explicit API key. Rejects with
+	 * `OAuthRefreshUnavailableError` (transient, retryable) when a retryable
+	 * refresh failure left no usable credential.
 	 */
 	access(provider: string, sessionId?: string, options?: AuthApiKeyOptions): Promise<OAuthAccess | undefined>;
 	/**

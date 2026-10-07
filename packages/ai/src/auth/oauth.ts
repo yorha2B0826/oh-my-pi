@@ -127,9 +127,11 @@ export class OAuthAccounts implements OAuthApi {
 	 * `enterpriseUrl`). For pure "give me the bytes for `Authorization`"
 	 * scenarios, prefer API-key resolution.
 	 *
-	 * Returns `undefined` when no OAuth credential is available, the
-	 * credential fails to refresh, or runtime/config overrides have replaced
-	 * OAuth with an explicit API key.
+	 * Returns `undefined` when no usable OAuth credential is available
+	 * (none stored, or every one definitively failed to refresh) or
+	 * runtime/config overrides have replaced OAuth with an explicit API key.
+	 * Rejects with {@link AIError.OAuthRefreshUnavailableError} (transient,
+	 * retryable) when a retryable refresh failure left no usable credential.
 	 */
 	async access(provider: string, sessionId?: string, options?: AuthApiKeyOptions): Promise<OAuthAccess | undefined> {
 		// Runtime / config overrides intentionally short-circuit OAuth: when the
