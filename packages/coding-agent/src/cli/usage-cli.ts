@@ -608,14 +608,20 @@ function formatPolicyLine(
 	// `omp usage` has no model/session context, so report the conservative
 	// account-wide state from the most-consumed visible window. Actual routing
 	// still scopes limits and selection in AuthStorage.
+	// Exhaustion follows the same status-first rule as the limit rows and routing's
+	// `isUsageLimitReached`: a provider-reported "exhausted" wins over the fraction.
+	const exhausted = (limits ?? []).some(limit => resolveStatus(limit) === "exhausted");
 	const usedFractions = (limits ?? [])
 		.map(resolveUsedFraction)
 		.filter((fraction): fraction is number => fraction !== undefined && Number.isFinite(fraction));
 	if (usedFractions.length === 0) {
-		return `policy: priority ${priority} · reserve ${reserveLabel} · reserve unknown`;
+		const unmeasured = exhausted ? "exhausted" : "reserve unknown";
+		return `policy: priority ${priority} · reserve ${reserveLabel} · ${unmeasured}`;
 	}
 	const remainingPct = Math.max(0, 1 - Math.max(...usedFractions)) * 100;
-	const state = remainingPct <= reservePct ? "inside reserve" : "eligible";
+	let state = "eligible";
+	if (exhausted || remainingPct <= 0) state = "exhausted";
+	else if (remainingPct <= reservePct) state = "inside reserve";
 	return `policy: priority ${priority} · reserve ${reserveLabel} · ${state} · ${remainingPct.toFixed(1)}% left`;
 }
 
