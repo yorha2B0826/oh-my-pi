@@ -16,6 +16,7 @@ import { editorKey, editorKeys } from "../chrome/keybinding-hints";
 import type { NativeNode, NativeUiEvent } from "../native/node";
 import { node, span } from "../native/describe";
 import { actionBar, actionButton, actionHint, overlayCard, statusHintsRow } from "../native/overlay";
+import { getKeybindings } from "../keybindings";
 
 export interface MoveOverlayResult {
 	directory: string;
@@ -193,7 +194,8 @@ export class MoveOverlay implements Component, Focusable {
 		const actions = actionBar([
 			actionButton("Accept", "accept", { keys: "tab" }),
 			null,
-			actionButton("Cancel", "cancel", { keys: "escape" }),
+			// The bound cancel key; Esc also cancels when it is unbound.
+			actionButton("Cancel", "cancel", { keys: getKeybindings().getKeys("tui.select.cancel")[0] ?? "escape" }),
 			actionButton("Confirm", "confirm", { keys: "enter", tone: "accent" }),
 		]);
 		const described = overlayCard("omp.dialog.move", "Move to directory", [this.#field, list, hints, actions]);

@@ -559,12 +559,7 @@ export class AgentTranscriptViewer implements Component {
 		}
 
 		if (matchesKey(data, "escape")) {
-			if (this.#editor && this.#editor.getText().trim() !== "") {
-				this.#editor.setText("");
-				this.#deps.requestRender();
-				return;
-			}
-			this.#deps.onClose();
+			this.#escape();
 			return;
 		}
 
@@ -647,9 +642,19 @@ export class AgentTranscriptViewer implements Component {
 		return lines;
 	}
 
-	/** The top-right `esc` closes the viewer, as Esc does on an empty draft. */
+	/** The top-right `esc` runs Esc. */
 	handleNativeEvent(event: NativeUiEvent): void {
-		if (event.type === "action" && event.act === "close") this.#deps.onClose();
+		if (event.type === "action" && event.act === "close") this.#escape();
+	}
+
+	/** Esc: clear a non-empty draft first, else close the viewer. */
+	#escape(): void {
+		if (this.#editor && this.#editor.getText().trim() !== "") {
+			this.#editor.setText("");
+			this.#deps.requestRender();
+			return;
+		}
+		this.#deps.onClose();
 	}
 
 	/**
