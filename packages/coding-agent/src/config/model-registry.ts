@@ -1,6 +1,6 @@
 import * as path from "node:path";
 import type { ApiKeyResolver, FetchImpl, ResolvedApiKey, UsageProvider } from "@oh-my-pi/pi-ai";
-import type { AuthApiKeyOptions } from "@oh-my-pi/pi-ai/auth-storage";
+import { type AuthApiKeyOptions, oauthAccountKey } from "@oh-my-pi/pi-ai/auth-storage";
 import { registerCustomApi, unregisterCustomApis } from "@oh-my-pi/pi-ai/api-registry";
 import { routeFetch as routeIwanFetch } from "@oh-my-pi/pi-ai/iwan/route";
 import { registerOAuthProvider, unregisterOAuthProvider, unregisterOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
@@ -116,7 +116,7 @@ import {
 	kNoAuth,
 	type ProviderDiscoveryState,
 	RUNTIME_DYNAMIC_MODEL_FETCH_TIMEOUT_MS,
-	resolveCodexDiscoveryAccounts,
+	resolveOAuthDiscoveryAccounts,
 	SPECIAL_MODEL_MANAGER_PROVIDER_IDS,
 	STARTUP_MODEL_CACHE_PROVIDER_IDS,
 	withModelDiscoveryTimeout,
@@ -2164,7 +2164,19 @@ export class ModelRegistry {
 				resolveKey: extractGoogleOAuthToken,
 				createOptions: oauthToken =>
 					googleAntigravityModelManagerOptions({
-						oauthToken,
+						resolveAccounts: async () => {
+							const accounts = await resolveOAuthDiscoveryAccounts(
+								this.authStorage,
+								"google-antigravity",
+								oauthToken,
+							);
+							return (
+								accounts?.map(account => ({
+									accessToken: account.accessToken,
+									accountKey: oauthAccountKey(account),
+								})) ?? null
+							);
+						},
 						endpoint: this.#descriptorBaseUrl("google-antigravity"),
 						fetch: this.#fetch,
 					}),
@@ -2199,7 +2211,8 @@ export class ModelRegistry {
 					if (officialCredential || isOfficialCodexApiUrl(configuredBaseUrl)) {
 						return openaiCodexModelManagerOptions({
 							baseUrl: officialCredential ? undefined : configuredBaseUrl,
-							resolveAccounts: () => resolveCodexDiscoveryAccounts(this.authStorage, accessToken),
+							resolveAccounts: () =>
+								resolveOAuthDiscoveryAccounts(this.authStorage, "openai-codex", accessToken),
 							fetch: this.#fetch,
 						});
 					}
