@@ -405,6 +405,7 @@ import type { BuildSessionContextOptions, SessionContext } from "./session-conte
 import { buildSessionContext, getRestorableSessionModels, isTranscriptEntry } from "./session-context";
 import type { CacheWarmer, CacheWarmingMode, CacheWarmingStatus } from "./cache-warmer";
 import { isUserRequestEntry, transcriptEntryMessage, userTurnDraft } from "@oh-my-pi/pi-tui/chat/transcript-entry";
+import { anonymizeSessionTranscripts } from "./session-anonymizer";
 import { formatSessionDumpText, formatSubagentDumpText, type SessionDumpArchive } from "./session-dump-format";
 import { collectSubSessions, type SubSession } from "./sub-sessions";
 import type { BranchSummaryEntry, NewSessionOptions } from "./session-entries";
@@ -492,6 +493,8 @@ import {
 import { cfgTaskBatch, cfgTaskDisabledAgents } from "../task/settings";
 import {
 	cfgBranchSummaryReserveTokens,
+	cfgCompactionModelThresholds,
+	cfgCompactionModelThresholdsEnabled,
 	cfgExtendedContext,
 	cfgWorkspaceAdditionalDirectories,
 } from "./context-settings";
@@ -2371,10 +2374,13 @@ export class AgentSession implements SettingsScope {
 		cfgProviderAppendOnlyContext.listen(this, () => this.#syncAppendOnlyContext(this.model));
 		cfgModelRoles.listen(this, () => this.#advisors.reconcileModelRoles());
 		// Re-derive the active model's effective context window when the
-		// extended-context setting flips at runtime: the registry re-clamps (or
-		// restores) premium long-context windows, and the live model object must
+		// extended-context setting flips at runtime, or a per-model compaction
+		// point moves past (or back inside) a standard window or is switched on/off: the registry
+		// re-clamps (or restores) extended windows, and the live model object must
 		// follow so compaction thresholds and context display react immediately.
-		cfgExtendedContext.listen(this, () => this.#reapplyExtendedContextPolicy());
+		cfgExtendedContext.listen(this, () => this.#reapplyContextWindowPolicy());
+		cfgCompactionModelThresholds.listen(this, () => this.#reapplyContextWindowPolicy());
+		cfgCompactionModelThresholdsEnabled.listen(this, () => this.#reapplyContextWindowPolicy());
 		cfgBrowserEnabled.listen(this, enabled => this.#reconcileEvalPreludeSetting("browser.enabled", enabled));
 		cfgComputerEnabled.listen(this, enabled => this.#reconcileEvalPreludeSetting("computer.enabled", enabled));
 		cfgRatchetEnabled.listen(this, enabled => this.#reconcileEvalPreludeSetting("ratchet.enabled", enabled));
@@ -5917,7 +5923,10 @@ export class AgentSession implements SettingsScope {
 
 	async #refreshLazyLocalContext(model: Model): Promise<void> {
 		try {
-			const refreshed = await this.#modelRegistry.refreshSelectedModelMetadata(model);
+			const refreshed = this.#modelRegistry.fitContextWindow(
+				await this.#modelRegistry.refreshSelectedModelMetadata(model),
+				this.settings,
+			);
 			const current = this.model;
 			// Skip if the user switched models mid-stream, or the runtime window
 			// matches what the session already holds.
@@ -10564,22 +10573,32 @@ export class AgentSession implements SettingsScope {
 	}
 
 	/**
-	 * Rebuild the model catalog after an `extendedContext` toggle and rebind the
-	 * active model when its effective context window changed. Same-model rebinds
-	 * skip provider-session resets (`modelsAreEqual` sees no change), so this
-	 * only refreshes metadata consumers (compaction thresholds, context display).
+	 * Rebuild the model catalog after an `extendedContext` toggle or a
+	 * `compaction.modelThresholds` edit and rebind the active model when its
+	 * effective context window changed. Same-model rebinds skip provider-session
+	 * resets (`modelsAreEqual` sees no change), so this only refreshes metadata
+	 * consumers (compaction thresholds, context display).
 	 */
-	async #reapplyExtendedContextPolicy(): Promise<void> {
+	async #reapplyContextWindowPolicy(): Promise<void> {
+		// Refit the bound row right away (the agent's model resolver applies this
+		// session's settings to its known tiers), so a prompt started before the
+		// catalog rebuild settles already runs with the new window.
+		const previousModel = this.model;
+		if (previousModel) this.agent.setModel(previousModel);
 		try {
 			await this.#modelRegistry.reapplyModelPolicies();
 			const currentModel = this.model;
 			if (!currentModel || this.#isDisposed) return;
-			const updated = this.#modelRegistry.find(currentModel.provider, currentModel.id);
-			if (updated && updated.contextWindow !== currentModel.contextWindow) {
+			const found = this.#modelRegistry.find(currentModel.provider, currentModel.id);
+			const updated = found && this.#modelRegistry.fitContextWindow(found, this.settings);
+			// Compare against the window bound before the refit so dependent state
+			// still reconciles once even though the refit already moved the row.
+			const baseline = previousModel && modelsAreEqual(previousModel, currentModel) ? previousModel : currentModel;
+			if (updated && updated.contextWindow !== baseline.contextWindow) {
 				await this.#setModelWithProviderSessionReset(updated);
 			}
 		} catch (error) {
-			logger.warn("extended-context policy reapply failed", { error: String(error) });
+			logger.warn("context-window policy reapply failed", { error: String(error) });
 		}
 	}
 
@@ -13122,6 +13141,35 @@ export class AgentSession implements SettingsScope {
 	}
 
 	/**
+	 * Write `/dump anon` to an auto-named zip in `os.tmpdir()`: `session.jsonl`
+	 * and one `subagents/<path>.jsonl` per persisted subagent, anonymized with one
+	 * shared token table (see {@link anonymizeSessionTranscripts}).
+	 *
+	 * @returns the archive path and member names, or `undefined` when the main
+	 * session has no messages.
+	 */
+	async dumpAnonymizedArchiveToTmpDir(): Promise<SessionDumpArchive | undefined> {
+		if (this.messages.length === 0) return undefined;
+		const result = await anonymizeSessionTranscripts({
+			header: this.sessionManager.getHeader(),
+			entries: this.sessionManager.getEntries(),
+			sessionFile: this.sessionManager.getSessionFile(),
+			malformedRecords: this.sessionManager.loadedMalformedRecords,
+		});
+		const filePath = path.join(os.tmpdir(), `omp-dump-anon-${Snowflake.next()}.zip`);
+		await writeArchive(filePath, "zip", result.files);
+		return {
+			path: filePath,
+			files: result.files.map(([name]) => name),
+			subagentCount: result.subagentCount,
+			subagentError: result.subagentError,
+			anonymized: true,
+			malformed: result.malformed,
+			unreadable: result.unreadable,
+		};
+	}
+
+	/**
 	 * Dump the current session's LLM-facing request context as JSON to a
 	 * auto-named file in `os.tmpdir()`. This is the synchronous
 	 * `convertToLlm`-boundary snapshot — system prompt, tools (wire schemas),
@@ -13245,7 +13293,8 @@ export class AgentSession implements SettingsScope {
 		// switched models while discovery was in flight.
 		const current = this.model;
 		if (!current || !modelsAreEqual(current, boundAtStartup)) return;
-		const refreshed = this.#modelRegistry.find(current.provider, current.id);
+		const found = this.#modelRegistry.find(current.provider, current.id);
+		const refreshed = found && this.#modelRegistry.fitContextWindow(found, this.settings);
 		if (!refreshed || refreshed.contextWindow === current.contextWindow) return;
 		this.agent.setModel(refreshed);
 		await this.#reconcileModelDependentState(current, refreshed);

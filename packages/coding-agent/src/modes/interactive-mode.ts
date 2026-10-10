@@ -7612,6 +7612,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		return this.#commandController.handleDumpAllCommand();
 	}
 
+	async handleDumpAnonCommand(): Promise<void> {
+		return this.#commandController.handleDumpAnonCommand();
+	}
+
 	handleAdvisorDumpCommand(isRaw?: boolean) {
 		return this.#commandController.handleAdvisorDumpCommand(isRaw);
 	}
@@ -7996,8 +8000,8 @@ export class InteractiveMode implements InteractiveModeContext {
 		return this.#selectorController.showIwanServerSelector();
 	}
 
-	showHookConfirm(title: string, message: string): Promise<boolean> {
-		return this.#extensionUiController.showHookConfirm(title, message);
+	showHookConfirm(title: string, message: string, dialogOptions?: InteractiveSelectorDialogOptions): Promise<boolean> {
+		return this.#extensionUiController.showHookConfirm(title, message, dialogOptions);
 	}
 
 	// Input handling
