@@ -3539,8 +3539,8 @@ function openCodeModelManagerOptions(
 			},
 		},
 		...(apiKey && {
-			fetchDynamicModels: () =>
-				fetchOpenAICompatibleModels<Api>({
+			fetchDynamicModels: async () => {
+				const discovered = await fetchOpenAICompatibleModels<Api>({
 					api: "openai-completions",
 					provider: providerId,
 					baseUrl: discoveryBaseUrl,
@@ -3598,7 +3598,12 @@ function openCodeModelManagerOptions(
 						};
 					},
 					fetch: config?.fetch,
-				}),
+				});
+				if (!discovered) return null;
+				const seeds = seedModels(providerId).map(seed => ({ ...seed, baseUrl: basePath }));
+				const seedIds = new Set(seeds.map(seed => seed.id));
+				return [...discovered.filter(model => !seedIds.has(model.id)), ...seeds];
+			},
 		}),
 	};
 }
