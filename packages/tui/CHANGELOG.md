@@ -2,9 +2,15 @@
 
 ## [Unreleased]
 
+## [18.9.2] - 2026-10-11
+
+### Added
+
+- Added native TSP rendering support for Tern terminal sessions running inside tmux, with automatic session detection and safe title-setting behavior.
+
 ### Fixed
 
-- Improved responsiveness when placing assistant text after tool calls in long transcripts ([#12178](https://github.com/can1357/oh-my-pi/issues/12178), [#14344](https://github.com/can1357/oh-my-pi/pull/14344) by [@F0Rextasy](https://github.com/F0Rextasy), [#15353](https://github.com/can1357/oh-my-pi/pull/15353) by [@iliaal](https://github.com/iliaal)).
+- Improved responsiveness when inserting assistant messages after tool calls in long transcripts.
 
 ## [18.9.1] - 2026-10-11
 

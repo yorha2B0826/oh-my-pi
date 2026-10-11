@@ -2,13 +2,11 @@
 
 ## [Unreleased]
 
-### Added
+## [18.9.2] - 2026-10-11
 
-- Added the `judgment-questions-max` catalog axis and `resolveJudgmentQuestionsMax`: self-hosted OpenJEV judges are capped at 16 questions per System One request, razorback16/openjev's `openjev-latest`, Laya, Verdict and JevK5 at 256, and hosted jev stays uncapped ([#15368](https://github.com/can1357/oh-my-pi/pull/15368) by [@H4vC](https://github.com/H4vC))
+### Removed
 
-### Fixed
-
-- Fixed Groq rejecting requests omp built for it: Kimi tool-call turns no longer carry `reasoning_content` (400 "property 'reasoning_content' is unsupported"), and Qwen is driven by `reasoning_effort` with `none` as its off value instead of `enable_thinking` (400 "property 'enable_thinking' is unsupported"); Groq Qwen models offer only the effort levels Groq accepts (low/medium/high, or on for Qwen 3.6) ([#15322](https://github.com/can1357/oh-my-pi/pull/15322) by [@Robinbinu](https://github.com/Robinbinu))
+- Removed `parseCloudflareAiGatewayCredential`, `serializeCloudflareAiGatewayCredential`, and `CloudflareAiGatewayCredential` from `@oh-my-pi/pi-catalog/wire/cloudflare-ai-gateway`. Use the equivalents from `@oh-my-pi/pi-catalog/wire/cloudflare` instead.
 
 ## [18.9.1] - 2026-10-11
 
