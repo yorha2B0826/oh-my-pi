@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.9.1] - 2026-10-11
+
 ### Added
 
 - Added the `supports-thinking-binding-controls` axis to Bedrock Converse models (on by default) so a rule or `models.yml` override can turn off Claude thinking-binding controls on hosts that reject them ([#15316](https://github.com/can1357/oh-my-pi/pull/15316) by [@harshaygadekar](https://github.com/harshaygadekar))
