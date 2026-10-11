@@ -2,14 +2,34 @@
 
 ## [Unreleased]
 
+### Added
+
+- `computer` elements gain `doubleClick()`, and using an element method or field on the array `win.find(…)` returns, in JavaScript, Python or `computer.run`, says to pick one element first instead of failing with "is not a function" or reading `undefined` ([#15312](https://github.com/can1357/oh-my-pi/pull/15312) by [@will-bogusz](https://github.com/will-bogusz))
+
 ### Changed
 
 - Reduced interactive startup memory usage for new sessions by initializing syntax highlighting only when needed; resumed sessions still prepare highlighting in the background so the restored transcript paints without delay ([#15299](https://github.com/can1357/oh-my-pi/pull/15299) by [@iliaal](https://github.com/iliaal))
 - Compacted Read directory listings by replacing alignment padding with single-space separators while retaining file sizes and relative modification times ([#9062](https://github.com/can1357/oh-my-pi/pull/9062) by [@MikeeI](https://github.com/MikeeI), [#15352](https://github.com/can1357/oh-my-pi/pull/15352) by [@iliaal](https://github.com/iliaal)).
+- YouTube fetches now ask yt-dlp for video metadata and English manual subtitles in one process instead of three, so the common manual-caption path saves two process spawns; automatic captions still fall back to a second process, and the transcript and metadata survive a failing subtitle transfer ([#15334](https://github.com/can1357/oh-my-pi/pull/15334) by [@yuzu-octopus](https://github.com/yuzu-octopus))
+- `computer` menus: `win.menu.select` takes a path the way `win.menu.items` does, as one title, an array, or separate arguments (`select("File", "Export…")`), and both name these forms when a path is malformed ([#15309](https://github.com/can1357/oh-my-pi/pull/15309) by [@will-bogusz](https://github.com/will-bogusz))
+- Reduced startup memory usage in standalone binaries by loading lazily imported code on demand ([#15298](https://github.com/can1357/oh-my-pi/pull/15298) by [@iliaal](https://github.com/iliaal))
+
 ### Fixed
 
 - Improved responsiveness when placing assistant text after tool calls in long transcripts ([#12178](https://github.com/can1357/oh-my-pi/issues/12178), [#14344](https://github.com/can1357/oh-my-pi/pull/14344) by [@F0Rextasy](https://github.com/F0Rextasy), [#15353](https://github.com/can1357/oh-my-pi/pull/15353) by [@iliaal](https://github.com/iliaal)).
 - Fixed `apply_patch` rejecting a hunk without context lines when its text occurs more than once ("Found 2 occurrences"); like Codex, each hunk now takes the first exact or whitespace-insensitive match at or after the previous hunk, while fuzzy matches must still be unique ([#15340](https://github.com/can1357/oh-my-pi/pull/15340) by [@Ikaleio](https://github.com/Ikaleio))
+- Fixed `find` sending more than 16 questions in one judgment request, which System One gateways such as OpenJEV reject with HTTP 422 ([#15160](https://github.com/can1357/oh-my-pi/pull/15160) by [@yuzu-octopus](https://github.com/yuzu-octopus))
+- Fixed `apply_patch` rejecting a hunk without context lines when its text occurs more than once ("Found 2 occurrences"); like Codex, each hunk now takes the first exact or whitespace-insensitive match at or after the previous hunk, while fuzzy matches must still be unique ([#15340](https://github.com/can1357/oh-my-pi/pull/15340) by [@Ikaleio](https://github.com/Ikaleio), [#15367](https://github.com/can1357/oh-my-pi/pull/15367) by [@H4vC](https://github.com/H4vC))
+- Fixed `find` failing filename ranking and sketch scoring on judge endpoints that cap questions per request, such as OpenJEV (HTTP 422); only those endpoints now get smaller requests ([#15160](https://github.com/can1357/oh-my-pi/pull/15160) by [@yuzu-octopus](https://github.com/yuzu-octopus))
+- Fixed `find` failing filename ranking and sketch scoring on judge endpoints that cap questions per request, such as OpenJEV (HTTP 422); only those endpoints now get smaller requests ([#15160](https://github.com/can1357/oh-my-pi/pull/15160) by [@yuzu-octopus](https://github.com/yuzu-octopus), [#15368](https://github.com/can1357/oh-my-pi/pull/15368) by [@H4vC](https://github.com/H4vC))
+- Fixed `find` failing filename ranking and sketch scoring on OpenJEV judges (HTTP 422, at most 16 questions per request); only judge models with a catalog question cap now get smaller requests ([#15160](https://github.com/can1357/oh-my-pi/pull/15160) by [@yuzu-octopus](https://github.com/yuzu-octopus), [#15368](https://github.com/can1357/oh-my-pi/pull/15368) by [@H4vC](https://github.com/H4vC))
+- Fixed `omp gc --apply` leaving full-size session rewrite temps (`.<name>.jsonl.<snowflake>.tmp`) behind after a writer was killed mid-save; the sessions phase now reclaims them past the write grace ([#15350](https://github.com/can1357/oh-my-pi/issues/15350))
+### Fixed
+
+- `omp auth-gateway serve` now accepts OpenRouter routing-variant selectors such as `openrouter/<model>:floor` or `:nitro`, matching `--model`, instead of returning "Unknown model".
+- Fixed `computer` helpers given a missing or non-string text argument (`setValue`, `type`, `press`, `perform`, `ref`, `apps.open`, `clipboard.write`) failing with a native conversion error that named neither the helper nor the argument; they now say which, before any native call ([#15309](https://github.com/can1357/oh-my-pi/pull/15309) by [@will-bogusz](https://github.com/will-bogusz))
+- Fixed `/tan` forks that reset inherited spend still showing the parent's subagent costs: billing inside inherited task results is now cleared too, while token counts are kept ([#15039](https://github.com/can1357/oh-my-pi/pull/15039) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy))
+- Fixed `omp://` documentation links in chat, read cards and grep headers doing nothing when clicked in a source checkout; they now open the matching file under `docs/` ([#15086](https://github.com/can1357/oh-my-pi/pull/15086) by [@danzaio](https://github.com/danzaio))
 
 ## [18.9.1] - 2026-10-11
 
