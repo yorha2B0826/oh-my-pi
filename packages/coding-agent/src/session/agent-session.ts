@@ -154,7 +154,7 @@ import type {
 	ToolInfo,
 	TreePreparation,
 } from "../extensibility/extensions";
-import { emitSessionShutdownEvent, TOP_LEVEL_AGENT } from "../extensibility/extensions";
+import { emitSessionShutdownEvent, TOP_LEVEL_AGENT, UNAVAILABLE_ANNOTATIONS } from "../extensibility/extensions";
 import { extensionEventFromSessionEvent } from "../extensibility/extensions/lifecycle-mirror";
 import { ManagedTimers } from "../extensibility/extensions/managed-timers";
 import { createExtensionModelQuery } from "../extensibility/extensions/model-api";
@@ -747,6 +747,22 @@ function captureLiveDumpState(ref: AgentRef): SessionDumpLiveState | undefined {
 	};
 }
 
+/**
+ * Why {@link AgentSession.runEphemeralTurn} would reject a `maxTokens` cap on `model`, or
+ * `undefined` when it honors one.
+ */
+function ephemeralMaxTokensRejection(model: Model): string | undefined {
+	const thinking = model.thinking;
+	const budgetThinking = thinking?.mode === "budget" || thinking?.mode === "anthropic-budget-effort";
+	if (budgetThinking && thinking.requiresEffort && !thinking.suppressWhenOff) {
+		return "requires budget thinking and cannot preserve maxTokens for ephemeral turns";
+	}
+	// Do not silently start an unbounded request when discovery or transport
+	// policy says the output limit will be omitted or overwritten.
+	if (!supportsOutputTokenLimit(model)) return "does not support maxTokens for ephemeral turns";
+	return undefined;
+}
+
 export class AgentSession implements SettingsScope {
 	readonly agent: Agent;
 	readonly sessionManager: SessionManager;
@@ -915,18 +931,9 @@ export class AgentSession implements SettingsScope {
 
 	readonly #eval: EvalRunner;
 	readonly #evalToolSession: ToolSession | undefined;
-	/**
-	 * AsyncJobManager owned by this session (top-level only). Subagents leave
-	 * this undefined and **MUST NOT** dispose the global instance on teardown.
-	 */
+	/** Manager owned by this top-level session; subagents borrow but never dispose it. */
 	readonly #ownedAsyncJobManager: AsyncJobManager | undefined;
-	/**
-	 * AsyncJobManager scoped to this session for introspection/cancellation.
-	 *
-	 * This differs from `#ownedAsyncJobManager`: subagents can inherit a parent
-	 * manager for their own owner id, while secondary top-level sessions are left
-	 * undefined to avoid reading the primary's jobs.
-	 */
+	/** Manager of this session's root, used for its own job queries and deliveries. */
 	readonly #asyncJobManager: AsyncJobManager | undefined;
 	/** Clears this session's owner delivery sink registration; set when a manager + agent id exist. */
 	#unregisterAsyncDeliverySink: (() => void) | undefined;
@@ -2357,7 +2364,7 @@ export class AgentSession implements SettingsScope {
 				this.#todo.syncFromBranch();
 				this.#modelMentions.syncFromBranch();
 			},
-			resetAdvisorRuntimes: (reason?: string) => this.#advisors.resetAllRuntimes(reason),
+			resetAdvisorRuntimes: (reason, options) => this.#advisors.resetAllRuntimes(reason, options),
 			rebaseAdvisorPrefix: reason => this.#advisors.rebaseDeliveredPrefixes(reason),
 			rebaseAfterCompaction: () => this.#stats.rebaseAfterCompaction(),
 			recordAnchoredHistoryRewrite: tokensRemoved => this.#stats.recordAnchoredHistoryRewrite(tokensRemoved),
@@ -8095,6 +8102,9 @@ export class AgentSession implements SettingsScope {
 			},
 			getSystemPrompt: () => this.systemPrompt,
 			runEphemeralTurn: args => this.runEphemeralTurn(args),
+			// The SDK always builds a runner (which receives the annotations factory); this runner-less
+			// context only exists for directly constructed sessions, which have no `/annotate` wiring.
+			annotations: UNAVAILABLE_ANNOTATIONS,
 			setInterval: (callback, ms, ...args) => this.#fallbackTimers().setInterval(callback, ms, ...args),
 			setTimeout: (callback, ms, ...args) => this.#fallbackTimers().setTimeout(callback, ms, ...args),
 			clearTimer: timer => this.#fallbackTimers().clear(timer),
@@ -10981,6 +10991,19 @@ export class AgentSession implements SettingsScope {
 	}
 
 	/**
+	 * Whether {@link runEphemeralTurn} would honor a `maxTokens` cap on the current model without
+	 * otherwise changing the request. On budget-thinking models a cap forces thinking off; when the
+	 * session thinks, that changes the thinking parameters, which providers key their prompt caches
+	 * on. Callers whose cap is optional send one only when this holds.
+	 */
+	ephemeralMaxTokensPreservesRequest(): boolean {
+		const model = this.model;
+		if (!model || ephemeralMaxTokensRejection(model)) return false;
+		const budgetThinking = model.thinking?.mode === "budget" || model.thinking?.mode === "anthropic-budget-effort";
+		return !budgetThinking || shouldDisableReasoning(this.thinkingLevel);
+	}
+
+	/**
 	 * Run a single ephemeral side-channel turn against this session's current
 	 * model + system prompt + history. The main turn's tool catalog is sent
 	 * to preserve the prompt cache unless `tools: false` is requested. The
@@ -11017,24 +11040,33 @@ export class AgentSession implements SettingsScope {
 				throw new Error(`${field} must be a positive safe integer.`);
 			}
 		}
+		const sessionEffort = toReasoningEffort(this.thinkingLevel);
+		// Providers key prompt caches on reasoning parameters, so a lower effort is free only where
+		// the request keeps them and carries the change as a per-message control. Anthropic records
+		// the effort it kept on responses from models that take such controls; without that record
+		// on this model's last reply the change would rewrite the top-level effort.
+		const lastReply = this.messages.findLast(message => message.role === "assistant");
+		const lowestEffort =
+			args.minimizeEffort &&
+			sessionEffort !== undefined &&
+			lastReply?.role === "assistant" &&
+			lastReply.provider === model.provider &&
+			lastReply.model === model.id &&
+			lastReply.requestControls?.effort !== undefined
+				? model.thinking?.efforts[0]
+				: undefined;
 		const cappedBudgetThinking =
 			args.maxTokens !== undefined &&
 			(model.thinking?.mode === "budget" || model.thinking?.mode === "anthropic-budget-effort");
-		if (cappedBudgetThinking && model.thinking?.requiresEffort && !model.thinking.suppressWhenOff) {
+		const maxTokensRejection = args.maxTokens !== undefined ? ephemeralMaxTokensRejection(model) : undefined;
+		if (maxTokensRejection) {
 			throw new Error(
-				`Model ${modelDescription} requires budget thinking and cannot preserve maxTokens for ephemeral turns. Omit the cap or use a model that supports output limits.`,
+				`Model ${modelDescription} ${maxTokensRejection}. Omit the cap or use a model that supports output limits.`,
 			);
 		}
 		if (args.tools === false && requiresNativeTools(model)) {
 			throw new Error(
 				`Model ${modelDescription} does not support tools: false for ephemeral turns because its transport requires native tools.`,
-			);
-		}
-		// Do not silently start an unbounded request when discovery or transport
-		// policy says the output limit will be omitted or overwritten.
-		if (args.maxTokens !== undefined && !supportsOutputTokenLimit(model)) {
-			throw new Error(
-				`Model ${modelDescription} does not support maxTokens for ephemeral turns. Omit the cap or use a model that supports output limits.`,
 			);
 		}
 		assertEphemeralTurnReady();
@@ -11088,7 +11120,7 @@ export class AgentSession implements SettingsScope {
 				promptCacheKey: this.agent.promptCacheKey ?? this.agent.sessionId,
 				preferWebsockets: this.preferWebsockets,
 				providerSessionState: this.#providerSessionState,
-				reasoning: toReasoningEffort(this.thinkingLevel),
+				reasoning: lowestEffort ?? sessionEffort,
 				// Budget-thinking transports can raise explicit caps to make room for their
 				// default thinking budget. A side turn's cap is a hard resource boundary.
 				disableReasoning: shouldDisableReasoning(this.thinkingLevel) || cappedBudgetThinking,
