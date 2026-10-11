@@ -3509,8 +3509,8 @@ describe("AgentSession retry fallback", () => {
 	});
 
 	it("substitutes the failing model id into provider-wildcard chain entries", async () => {
-		const primaryModel = getBundledModel("google", "gemini-2.5-flash");
-		const fallbackModel = getBundledModel("google-vertex", "gemini-2.5-flash");
+		const primaryModel = getBundledModel("google", "gemini-3.5-flash");
+		const fallbackModel = getBundledModel("google-vertex", "gemini-3.5-flash");
 		if (!primaryModel || !fallbackModel) {
 			throw new Error("Expected bundled test models to exist");
 		}
@@ -3520,7 +3520,7 @@ describe("AgentSession retry fallback", () => {
 		const agent = createFallbackAgent(primaryModel, requestedModels);
 
 		// `google-vertex/*` is not a fixed target: it must adopt the failing
-		// model's id (google/gemini-2.5-flash -> google-vertex/gemini-2.5-flash).
+		// model's id (google/gemini-3.5-flash -> google-vertex/gemini-3.5-flash).
 		const settings = Settings.isolated({
 			"compaction.enabled": false,
 			"retry.maxRetries": 1,
@@ -3618,8 +3618,8 @@ describe("AgentSession retry fallback", () => {
 	});
 
 	it("matches id-prefixed wildcard keys and strips the vendor prefix for direct-provider targets", async () => {
-		const primaryModel = getBundledModel("openrouter", "google/gemini-2.5-flash");
-		const fallbackModel = getBundledModel("google-vertex", "gemini-2.5-flash");
+		const primaryModel = getBundledModel("openrouter", "google/gemini-3.5-flash");
+		const fallbackModel = getBundledModel("google-vertex", "gemini-3.5-flash");
 		if (!primaryModel || !fallbackModel) {
 			throw new Error("Expected bundled test models to exist");
 		}
