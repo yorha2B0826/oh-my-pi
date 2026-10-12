@@ -50,6 +50,40 @@ const RELEASE_METADATA_TIMEOUT_MS = 30_000;
 const BINARY_DOWNLOAD_TIMEOUT_MS = 15 * 60_000;
 
 /**
+ * Fork build: GitHub's anonymous API quota is only 60 requests/hour per IP, and
+ * this fork's update check egresses through a shared proxy, so the anonymous
+ * quota is routinely exhausted ("rate limit exceeded"). Send GITHUB_TOKEN or
+ * GH_TOKEN when either is present, which raises the quota to 5000/hour.
+ * Falling back to an anonymous request keeps public forks working.
+ */
+function forkReleaseHeaders(): Record<string, string> | undefined {
+	const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? ghCliToken();
+	return token ? { authorization: `Bearer ${token}` } : undefined;
+}
+
+/**
+ * Last-resort credential: reuse whatever the GitHub CLI already holds, so the
+ * update check works on machines where the user authenticated `gh` but never
+ * exported a token. Silent (undefined) when gh is missing or not logged in.
+ */
+function ghCliToken(): string | undefined {
+	try {
+		const result = Bun.spawnSync(["gh", "auth", "token"], { stdout: "pipe", stderr: "ignore" });
+		if (result.exitCode !== 0) return undefined;
+		const token = result.stdout.toString().trim();
+		return token.length > 0 ? token : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/** Distinguish an exhausted GitHub quota from other auth/forbidden responses. */
+function isRateLimited(response: Response): boolean {
+	if (response.status !== 403 && response.status !== 429) return false;
+	return response.status === 429 || response.headers.get("x-ratelimit-remaining") === "0";
+}
+
+/**
  * Core native addon package. Bumped in lock-step with {@link PACKAGE} so the
  * version sentinel the loader looks up at runtime matches the `.node` on
  * disk; see {@link buildBunInstallArgs} for why this must be installed
@@ -713,8 +747,14 @@ export async function getLatestRelease(
 	{
 		const response = await fetch(`${GITHUB_API}/repos/${REPO}/releases/latest`, {
 			signal: withTimeoutSignal(timeoutMs),
+			headers: forkReleaseHeaders(),
 		});
 		if (!response.ok) {
+			if (isRateLimited(response)) {
+				throw new Error(
+					"Failed to fetch fork release info: GitHub API rate limit exceeded (anonymous calls are capped at 60/h per IP; shared proxy egress exhausts it). Set GITHUB_TOKEN or GH_TOKEN to raise the limit to 5000/h.",
+				);
+			}
 			throw new Error(`Failed to fetch fork release info: ${response.statusText}`);
 		}
 		const data: unknown = await response.json();
