@@ -179,10 +179,10 @@ describe("native transcript redesign", () => {
 		await harness.render();
 		const frame = harness.find(node => node.k === "card" && node.p?.role === "omp.user");
 		expect(prop(frame, "head")).toBeUndefined();
-		const tool = (label: string) =>
-			harness!.find(node => node.p?.role === "omp.user.tool" && prop(node, "text") === label)!;
-		harness.event({ ev: "action", sf: harness.terminal.surface!, id: tool("Copy").id, act: "copy-message" });
-		harness.event({ ev: "action", sf: harness.terminal.surface!, id: tool("Rewind").id, act: "rewind" });
+		const tool = (icon: string) =>
+			harness!.find(node => node.p?.role === "omp.user.tool" && prop(node, "name") === icon)!;
+		harness.event({ ev: "action", sf: harness.terminal.surface!, id: tool("copy").id, act: "copy-message" });
+		harness.event({ ev: "action", sf: harness.terminal.surface!, id: tool("rewind").id, act: "rewind" });
 		expect(actions).toEqual([{ act: "copy", text: "Fix the build" }, { act: "rewind" }]);
 	});
 
