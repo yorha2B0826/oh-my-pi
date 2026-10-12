@@ -472,7 +472,6 @@ import { cfgBrowserEnabled, cfgBrowserFreezeOnTurnEnd, cfgBrowserIdleCloseSec } 
 import {
 	cfgClaudeResets,
 	cfgClaudeResetsAutoRedeem,
-	cfgCodeModeInputs,
 	cfgCodexResets,
 	cfgCodexResetsAutoRedeem,
 	cfgDefaultThinkingLevel,
@@ -1636,8 +1635,6 @@ export class AgentSession implements SettingsScope {
 		return listPlanFiles({ localProtocolOptions: this.#localProtocolOptions() });
 	}
 
-	#codeModeState: { namespacesInfo?: unknown };
-
 	/** Live generation tok/s for the working row; fed by this session's own streamed deltas. */
 	readonly tokenRate: TokenRateMeter;
 
@@ -1649,7 +1646,6 @@ export class AgentSession implements SettingsScope {
 			(previous, next) =>
 				isHiddenUserCompanion(previous) && (isHiddenUserCompanion(next) || isUserQueuedMessage(next)),
 		);
-		this.#codeModeState = config.codeModeState ?? {};
 		this.sessionManager = config.sessionManager;
 		this.settings = config.settings;
 		this.#skillDescriptions = config.skillDescriptions ?? new SkillDescriptionCatalog();
@@ -2061,9 +2057,6 @@ export class AgentSession implements SettingsScope {
 			queuedMessageCount: () => this.queuedMessageCount,
 			planModeEnabled: () => this.#planModeState?.enabled === true,
 			model: () => this.model,
-			setCodeModeNamespacesInfo: info => {
-				this.#codeModeState.namespacesInfo = info;
-			},
 			memoryBackendSession: () => this,
 			clearInheritedProviderPromptCacheKey: () => this.#clearInheritedProviderPromptCacheKey(),
 			clearMemoryPromotionSnapshot: () => this.#memory.clearPromotionSnapshot(),
@@ -2477,11 +2470,6 @@ export class AgentSession implements SettingsScope {
 				armIdleCloseForOwner(ownerId, seconds * 1000);
 			}
 		});
-		cfgCodeModeInputs.listen(this, () =>
-			this.#tools.reconcileCodeMode().catch(error => {
-				logger.warn("Code Mode reconcile after setting change failed", { error: String(error) });
-			}),
-		);
 
 		// Config-declared resolution done against the catalog as it stands at
 		// construction can be premature: background discovery is started
@@ -6285,11 +6273,6 @@ export class AgentSession implements SettingsScope {
 		return this.#tools.getEvalBridgeToolNames();
 	}
 
-	/** Tools left directly model-visible by Code Mode; undefined when inactive. */
-	getCodeModeDirectToolNames(): readonly string[] | undefined {
-		return this.#tools.getCodeModeDirectToolNames();
-	}
-
 	/** Whether a registry entry came from a built-in factory. */
 	hasBuiltInTool(name: string): boolean {
 		return this.#tools.hasBuiltInTool(name);
@@ -6400,29 +6383,6 @@ export class AgentSession implements SettingsScope {
 			});
 		this.#skillsAndCommandsRefresh = refresh;
 		return refresh;
-	}
-
-	/**
-	 * Applies Code Mode at session startup: when the initial model activates
-	 * it (`codeMode` `on`, or `auto` matching a `code_mode_only` catalog flag),
-	 * the initial tool surface is routed through the Code Mode-aware path so
-	 * the restricted direct surface and namespaces snapshot exist before the
-	 * first provider turn instead of waiting for an unrelated reconciliation.
-	 *
-	 * Inactive sessions keep their initial surface untouched: re-applying an
-	 * unchanged set would seed the prompt-rebuild signature cache and suppress
-	 * the first late tool registration's rebuild (non-MCP `xd://` mounts are
-	 * deliberately not part of that signature).
-	 */
-	initializeCodeMode(): Promise<void> {
-		const model = this.model;
-		if (!model || !this.#tools.codeModeChangesBetween(undefined, model)) return Promise.resolve();
-		return this.#tools.reconcileCodeMode();
-	}
-
-	/** Current Code Mode `tool_namespaces_info` snapshot, or `undefined` when inactive. */
-	get codeModeNamespacesInfo(): unknown {
-		return this.#codeModeState.namespacesInfo;
 	}
 
 	/** Selects enabled tools, ignoring names absent from the registry. */
@@ -7076,8 +7036,7 @@ export class AgentSession implements SettingsScope {
 				: sessionPlanUrl;
 
 		const planExists = fs.existsSync(resolvedPlanPath);
-		// Capability gates, not the visible surface: a Code Mode partition keeps
-		// `task` and `ask` callable through the eval bridge after demoting them.
+		// Capability gates, not the visible surface: `xd://`-mounted tools stay callable.
 		const capableToolNames = this.getEnabledToolNames();
 		const content = prompt.render(planModeActivePrompt, {
 			planFilePath: displayPlanPath,
@@ -8150,6 +8109,8 @@ export class AgentSession implements SettingsScope {
 				// OMP-owned Chromium alive (#5643).
 				void this.dispose().finally(() => process.exit(0));
 			},
+			resolvePlanReview: () => false,
+			getPendingPlanReview: () => undefined,
 			getContextUsage: () => this.getContextUsage(),
 			getAsyncJobSnapshot: () => this.getAsyncJobSnapshot(),
 			waitForIdle: () => this.waitForIdle(),
@@ -10383,8 +10344,8 @@ export class AgentSession implements SettingsScope {
 		if (this.agent.state.messages.length === 0) {
 			await this.refreshBaseSystemPrompt();
 		} else if (enabled) {
-			// Enabled covers top-level, xd://-mounted, and Code Mode bridge-demoted
-			// tools: every path through which the model can still reach a reader.
+			// Enabled covers top-level and xd://-mounted tools: every path through
+			// which the model can still reach a reader.
 			const hasSkillReader = this.getEnabledToolNames().some(name => toolReadsSkillUris(this.getToolByName(name)));
 			const renderedSkills = this.#skillDescriptions.render(
 				hasSkillReader ? this.skills.filter(skill => skill.hide !== true) : [],
@@ -10775,20 +10736,12 @@ export class AgentSession implements SettingsScope {
 			this.#emit({ type: "model_changed" });
 		}
 
-		await this.#reconcileModelDependentState(currentModel, model);
+		await this.#reconcileModelDependentState(model);
 	}
 
-	async #reconcileModelDependentState(previousModel: Model | undefined, model: Model): Promise<void> {
+	async #reconcileModelDependentState(model: Model): Promise<void> {
 		// Re-evaluate append-only context mode — provider or setting may have changed
 		this.#syncAppendOnlyContext(model);
-
-		if (this.#tools.codeModeChangesBetween(previousModel, model) || this.#tools.codeModeDirectWireMetadataChanged()) {
-			try {
-				await this.#tools.reconcileCodeMode();
-			} catch (error) {
-				logger.warn("Code Mode reconcile after model change failed", { error: String(error) });
-			}
-		}
 
 		try {
 			await this.#tools.reconcileThinkTool();
@@ -13556,7 +13509,7 @@ export class AgentSession implements SettingsScope {
 		const refreshed = found && this.#modelRegistry.fitContextWindow(found, this.settings);
 		if (!refreshed || refreshed.contextWindow === current.contextWindow) return;
 		this.agent.setModel(refreshed);
-		await this.#reconcileModelDependentState(current, refreshed);
+		await this.#reconcileModelDependentState(refreshed);
 		if (this.#isDisposed) return;
 		this.#emit({ type: "model_changed" });
 	}

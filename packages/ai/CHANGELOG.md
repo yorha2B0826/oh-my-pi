@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Removed
+
+- Removed the `toolNamespacesInfo` stream option; Codex requests no longer send `tool_namespaces_info` turn metadata, and `code_mode_tool_names`/`tool_namespaces_info` are no longer reserved client metadata keys.
+
 ## [18.10.3] - 2026-10-12
 
 ### Breaking Changes
@@ -176,6 +180,7 @@
 
 ### Fixed
 
+- Fixed Codex cybersecurity policy errors incorrectly retrying without Daybreak and disabling it for subsequent requests, while preserving retries without Daybreak when access is rejected ([#15472](https://github.com/can1357/oh-my-pi/pull/15472) by [@taibenvenuti](https://github.com/taibenvenuti))
 - Fixed a single transient OAuth token-refresh failure (network blip, timeout, 5xx) ending a running session, including subagents restricted to an account pool, with a non-retryable "No API key for provider" error while the stored credential was still valid; the refresh error now surfaces and the request is retried ([#14843](https://github.com/can1357/oh-my-pi/pull/14843) by [@H4vC](https://github.com/H4vC))
 
 ## [18.8.1] - 2026-10-07

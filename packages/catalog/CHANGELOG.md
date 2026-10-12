@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Removed
+
+- Removed the Codex `toolMode` model field (`code_mode_only`); Codex discovery no longer maps `tool_mode`
+
 ## [18.10.3] - 2026-10-12
 
 ### Breaking Changes
