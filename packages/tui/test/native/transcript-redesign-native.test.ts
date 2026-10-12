@@ -186,6 +186,37 @@ describe("native transcript redesign", () => {
 		expect(actions).toEqual([{ act: "copy", text: "Fix the build" }, { act: "rewind" }]);
 	});
 
+	it("copies a turn's answer from its footer: the text blocks a blank line apart, no thinking", async () => {
+		const actions: TranscriptAction[] = [];
+		setTranscriptActionHandler(action => actions.push(action));
+		const answer = (...content: AssistantMessage["content"]): AssistantMessage => ({
+			...failed(""),
+			stopReason: "stop",
+			errorMessage: undefined,
+			content,
+		});
+		const component = new AssistantMessageComponent(
+			answer(
+				{ type: "text", text: "First part.\n" },
+				{ type: "thinking", thinking: "Checking the rest" },
+				{ type: "text", text: "  Second part." },
+			),
+		);
+		component.setTurnUsage({ elapsedMs: 133_000, input: 70_000, output: 1_000, cost: 0.85 });
+		harness = await TspHarness.start();
+		harness.tui.addChild(component);
+		await harness.render();
+		const copy = harness.find(node => node.p?.role === "omp.turn.copy");
+		harness.event({ ev: "action", sf: harness.terminal.surface!, id: copy!.id, act: "copy-answer" });
+		expect(actions).toEqual([{ act: "copy", text: "First part.\n\nSecond part." }]);
+
+		component.updateContent(answer({ type: "thinking", thinking: "Nothing to say" }));
+		await harness.render();
+		expect(harness.find(node => node.p?.role === "omp.turn.usage")).toBeDefined();
+		expect(harness.find(node => node.p?.role === "omp.turn.copy")).toBeUndefined();
+		expect(harness.errors).toEqual([]);
+	});
+
 	it("shows a user message's time on the terminal's clock", async () => {
 		setTranscriptActionHandler(() => {});
 		const at = new Date(2026, 0, 1, 18, 5).getTime();
