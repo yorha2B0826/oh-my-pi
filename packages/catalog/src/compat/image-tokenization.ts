@@ -66,17 +66,13 @@ export interface ImageTokenizationTarget {
 	identity?: Pick<ModelIdentity, "class" | "family" | "revision">;
 }
 
-/**
- * The reader's image billing rule: its lineage rule, else its wire API's
- * fallback; undefined when neither covers it (an unclassified model on an
- * unregistered API).
- */
-export function resolveImageTokenization(target: ImageTokenizationTarget): ImageTokenization | undefined {
+/** Catalog axes for `target`'s identity on its host and wire API. */
+function resolveImageAxes(target: ImageTokenizationTarget): Record<string, unknown> {
 	const provider = target.provider ?? "";
 	const model = target.id ?? "";
 	const identity: Pick<ModelIdentity, "class" | "family" | "revision"> =
 		target.identity ?? (model ? classifyModel(provider, model, { lenient: true }) : UNCLASSIFIED);
-	const rule = resolveCascade({
+	return resolveCascade({
 		provider,
 		api: target.api ?? "",
 		class: identity.class,
@@ -84,8 +80,26 @@ export function resolveImageTokenization(target: ImageTokenizationTarget): Image
 		reasoning: false,
 		...(identity.family !== undefined && { family: identity.family }),
 		...(identity.revision !== undefined && { revision: identity.revision }),
-	}).catalog.imageTokenization;
+	}).catalog;
+}
+
+/**
+ * The reader's image billing rule: its lineage rule, else its wire API's
+ * fallback; undefined when neither covers it (an unclassified model on an
+ * unregistered API).
+ */
+export function resolveImageTokenization(target: ImageTokenizationTarget): ImageTokenization | undefined {
+	const rule = resolveImageAxes(target).imageTokenization;
 	return isImageTokenization(rule) ? rule : undefined;
+}
+
+/**
+ * Longest image edge the reader's host passes to the model (`image-max-edge`),
+ * or undefined when the host keeps the image's size.
+ */
+export function resolveImageMaxEdge(target: ImageTokenizationTarget): number | undefined {
+	const edge = resolveImageAxes(target).imageMaxEdge;
+	return typeof edge === "number" && edge > 0 ? edge : undefined;
 }
 
 /** Scale `size` down (never up) so its longest side is at most `maxEdge`. */

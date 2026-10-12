@@ -55,6 +55,13 @@ const CODEX_PROXY_MODEL = buildModel({
 	...toModelSpec(CODEX_MODEL),
 	baseUrl: "https://codex-proxy.example/backend-api",
 });
+const ANTIGRAVITY_CLAUDE_MODEL = getBundledModel("google-antigravity", "claude-sonnet-4-6");
+const ANTIGRAVITY_GEMINI_MODEL = getBundledModel("google-antigravity", "gemini-3.7-flash");
+const XAI_MODEL = getBundledModel("xai", "grok-4.7");
+const XAI_OAUTH_MODEL = getBundledModel("xai-oauth", "grok-4.7");
+const CURSOR_CLAUDE_MODEL = getBundledModel("cursor", "claude-opus-5-high");
+const CURSOR_GPT_MODEL = getBundledModel("cursor", "gpt-5.5");
+const CURSOR_DEFAULT_MODEL = getBundledModel("cursor", "default");
 // A base64 character occupies one byte in Anthropic's JSON request body.
 const HALF_ANTHROPIC_IMAGE_BUDGET = "A".repeat(12_000_000);
 
@@ -116,6 +123,13 @@ describe("provider context image budgets", () => {
 		["an Anthropic proxy", ANTHROPIC_PROXY_MODEL, 90],
 		["the official Codex backend", CODEX_MODEL, 2000],
 		["a Codex proxy", CODEX_PROXY_MODEL, 200],
+		["Claude on Antigravity", ANTIGRAVITY_CLAUDE_MODEL, 20],
+		["Gemini on Antigravity", ANTIGRAVITY_GEMINI_MODEL, 60],
+		["xAI", XAI_MODEL, 60],
+		["xAI OAuth", XAI_OAUTH_MODEL, 60],
+		["Claude on Cursor", CURSOR_CLAUDE_MODEL, 20],
+		["GPT on Cursor", CURSOR_GPT_MODEL, 60],
+		["Cursor's default route", CURSOR_DEFAULT_MODEL, 20],
 	] as const)("keeps the newest images up to the count %s allows", (_label, model, budget) => {
 		const context: Context = {
 			systemPrompt: [],
@@ -131,6 +145,40 @@ describe("provider context image budgets", () => {
 
 		expect(imageData(clamped)).toEqual(Array.from({ length: budget }, (_, index) => `image-${index + 1}`));
 	});
+
+	it.each([
+		// Claude's upstream message limit on Antigravity; Gemini there took 64 MB.
+		["Claude on Antigravity", ANTIGRAVITY_CLAUDE_MODEL, 30_000_000],
+		["Gemini on Antigravity", ANTIGRAVITY_GEMINI_MODEL, 64_000_000],
+		// api.x.ai rejects a body over 50 MiB.
+		["xAI", XAI_MODEL, 52_428_800],
+		["xAI OAuth", XAI_OAUTH_MODEL, 52_428_800],
+		// Cursor took a 64 MB body for both upstreams.
+		["Claude on Cursor", CURSOR_CLAUDE_MODEL, 64_000_000],
+		["GPT on Cursor", CURSOR_GPT_MODEL, 64_000_000],
+	] as const)(
+		"keeps %s under its measured body limit at omp's 500 KiB image resize target",
+		(_label, model, bodyLimit) => {
+			// No byte budget applies on these hosts, so the count alone bounds the
+			// inline bytes of resized screenshots (`images.autoResize`, on by default).
+			const resized = image("A".repeat(Math.ceil((500 * 1024) / 3) * 4));
+			const context: Context = {
+				systemPrompt: [],
+				tools: [],
+				messages: Array.from({ length: 1_000 }, (_, index) => ({
+					role: "user",
+					content: [resized],
+					timestamp: index,
+				})),
+			};
+
+			const kept = imageData(clampProviderContextImages(context, model));
+
+			expect(clampProviderContextImageBytes(context, model)).toBe(context);
+			expect(kept.length).toBeGreaterThan(5);
+			expect(kept.reduce((bytes, data) => bytes + data.length, 0)).toBeLessThan(bodyLimit);
+		},
+	);
 
 	it("keeps image-only tool results meaningful when every image block is dropped", () => {
 		const context: Context = {

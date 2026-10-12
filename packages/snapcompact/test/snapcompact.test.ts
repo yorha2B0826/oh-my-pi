@@ -345,9 +345,15 @@ describe("shape resolution", () => {
 		// geometry, billed under the standard tier's 1,568-token cap (39²).
 		const opus46 = snapcompact.resolveShape({ api: "anthropic-messages", id: "claude-opus-4-6" });
 		expect(opus46).toEqual({ ...snapcompact.SHAPES.anthropic, frameTokenEstimate: 1521 });
+		// Older Sonnet lines share that tier but only Sonnet 4.6 was billing-verified.
 		expect(snapcompact.resolveShape({ api: "anthropic-messages", id: "claude-3-5-sonnet" })).toEqual({
 			...snapcompact.SHAPES.anthropic,
 			frameTokenEstimate: 1521,
+		});
+		expect(snapcompact.resolveShape({ api: "anthropic-messages", id: "claude-sonnet-4-6" })).toEqual({
+			...snapcompact.SHAPES.anthropic,
+			frameTokenEstimate: 1521,
+			frameTokensVerified: true,
 		});
 
 		// Gemini reads 2048px frames at the same fixed bill, single-column with
@@ -402,6 +408,35 @@ describe("shape resolution", () => {
 		expect(legacyOnGoogle.frameTokenEstimate).toBe(snapcompact.SHAPES.google.frameTokenEstimate);
 		const legacyOnAnthropic = snapcompact.resolveShape({ api: "anthropic-messages" }, "5x8-bw");
 		expect(legacyOnAnthropic.frameTokenEstimate).toBe(69 * 69);
+	});
+
+	it("renders frames no wider than the host's image edge, priced at that size", async () => {
+		// Cursor fits Claude and GPT images into 1024×1024 before the model reads them.
+		const claude = snapcompact.resolveShape({ provider: "cursor", api: "cursor-agent", id: "claude-opus-5-high" });
+		expect(claude).toMatchObject({ cellWidth: 11, frameSize: 1024, frameTokenEstimate: 37 * 37 });
+		const gpt = snapcompact.resolveShape({ provider: "cursor", api: "cursor-agent", id: "gpt-5.4-nano" });
+		expect(gpt).toMatchObject({ cellHeight: 22, frameSize: 1024, frameTokenEstimate: Math.ceil(32 * 32 * 1.2) });
+		expect(
+			snapcompact.resolveShape({ provider: "cursor", api: "cursor-agent", id: "claude-opus-5-high" }, "5x8-bw")
+				.frameSize,
+		).toBe(1024);
+		const [frame] = await snapcompact.renderMany("cursor ".repeat(2000), { shape: claude, maxFrames: 1 });
+		expect(decodePng(Buffer.from(frame.data, "base64")).width).toBe(1024);
+		// Targets naming only the host or only Cursor's wire reach the same backend.
+		expect(snapcompact.resolveShape({ provider: "cursor", id: "claude-opus-5-high" }).frameSize).toBe(1024);
+		const [apiOnly] = await snapcompact.renderMany("cursor ".repeat(2000), {
+			model: { api: "cursor-agent", id: "claude-opus-5-high" },
+			maxFrames: 1,
+		});
+		expect(decodePng(Buffer.from(apiOnly.data, "base64")).width).toBe(1024);
+
+		// Readers whose host passes images through keep their own frame size.
+		expect(
+			snapcompact.resolveShape({ provider: "cursor", api: "cursor-agent", id: "gemini-3.7-flash" }).frameSize,
+		).toBe(2048);
+		expect(
+			snapcompact.resolveShape({ provider: "anthropic", api: "anthropic-messages", id: "claude-opus-5" }),
+		).toMatchObject({ frameSize: 1932, frameTokenEstimate: 69 * 69 });
 	});
 
 	it("prices frames by the reading model's lineage, not the wire API", () => {
@@ -463,11 +498,17 @@ describe("shape resolution", () => {
 		expect(
 			snapcompact.plannedFrameTokens(snapcompact.resolveShape({ api: "anthropic-messages", id: "claude-opus-5-5" })),
 		).toBe(4761);
-		// Same 2,882 price, but Grok is priced by the OpenAI-wire fallback and Opus 4.6 by the standard tier.
-		const grok = snapcompact.resolveShape({ api: "openai-responses", provider: "xai", id: "grok-4.7" });
+		// Same 2,882 price, but Grok 4.5 is priced by the OpenAI-wire fallback and Opus 4.6 by the standard tier.
+		const grok = snapcompact.resolveShape({ api: "openai-responses", provider: "xai", id: "grok-4.5" });
 		expect(grok.frameTokenEstimate).toBe(2882);
 		expect(grok.frameTokensVerified).toBeUndefined();
 		expect(snapcompact.plannedFrameTokens(grok)).toBe(snapcompact.FRAME_TOKEN_ESTIMATE);
+		// Grok 4.7's own rule is verified at its frame price.
+		expect(
+			snapcompact.plannedFrameTokens(
+				snapcompact.resolveShape({ api: "openai-responses", provider: "xai", id: "grok-4.7" }),
+			),
+		).toBe(2442);
 		expect(
 			snapcompact.plannedFrameTokens(snapcompact.resolveShape({ api: "anthropic-messages", id: "claude-opus-4-6" })),
 		).toBe(snapcompact.FRAME_TOKEN_ESTIMATE);
@@ -480,7 +521,7 @@ describe("shape resolution", () => {
 		).toBe(forced);
 		expect(
 			snapcompact.plannedFrameTokens(
-				snapcompact.resolveShape({ api: "openai-responses", provider: "xai", id: "grok-4.7" }, "5x8-bw"),
+				snapcompact.resolveShape({ api: "openai-responses", provider: "xai", id: "grok-4.5" }, "5x8-bw"),
 			),
 		).toBe(forced);
 	});

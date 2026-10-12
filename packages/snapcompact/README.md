@@ -26,6 +26,8 @@ Frame shapes are provider-aware, chosen by SQuAD recall evals (see `research/`) 
 
 Bitmap shapes keep their provider-tuned geometry and draw missing glyphs through the embedded Silver TrueType fallback one character at a time; East Asian (CJK/Kana/Hangul) glyphs render full-width across two cells so they stay legible in the narrow ASCII grid. Selecting `silver16-bw` uses Silver for the whole frame.
 
+A host that downscales images before the model reads them (catalog `image-max-edge`; Cursor fits Claude and GPT images into 1024×1024) gets frames rendered at that edge, forced variants included, so the glyphs reach the model at the size they were drawn.
+
 ## Install
 
 ```sh

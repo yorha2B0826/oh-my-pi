@@ -42,6 +42,10 @@
  * Models without a lineage rule fall back to the catalog rule for their wire
  * API; a reader with neither costs {@link FRAME_TOKEN_ESTIMATE} per frame.
  *
+ * A host that downscales every image before the model reads it (catalog
+ * `image-max-edge`, e.g. Cursor) gets frames rendered at that edge instead,
+ * so glyphs reach the model at the size they were drawn.
+ *
  * The whole pass is local and deterministic — no LLM call, no API key, no
  * latency beyond rendering. Rasterization and PNG encoding happen in native
  * code (`renderSnapcompactPng` in `crates/pi-natives/src/snapcompact.rs`).
@@ -51,11 +55,13 @@
 
 import type { Api, ImageContent, Message, Model, TextContent } from "@oh-my-pi/pi-ai";
 import { reachesOfficialEndpoint } from "@oh-my-pi/pi-ai/providers/anthropic-state";
+import { resolveCatalogPolicy } from "@oh-my-pi/pi-catalog/compat/catalog-policy";
 import {
 	type ImageSize,
 	type ImageTokenization,
 	type ImageTokenizationTarget,
 	imageTokens,
+	resolveImageMaxEdge,
 	resolveImageTokenization,
 } from "@oh-my-pi/pi-catalog/compat/image-tokenization";
 import { resolveImageCountBudget, resolveInlineImageByteBudget } from "@oh-my-pi/pi-catalog/compat/request-size";
@@ -432,16 +438,23 @@ export interface ShapeTarget {
  * Pick the frame shape for a reader. An explicit `variant` (anything but
  * `"auto"`) forces that geometry; otherwise the model id selects the
  * eval-winning shape — and frame size — for its model line, falling back to
- * the API family's winner when the model is unmeasured. Billing (token
+ * the API family's winner when the model is unmeasured. Either way the frame
+ * is no wider than the host's catalog `image-max-edge`. Billing (token
  * estimate, detail hint) is computed for the resolved frame size from the
  * model's catalog image rule. Accepts a full pi-ai `Model` or any
  * `{ api, id }` subset.
  */
 export function resolveShape(model?: ShapeTarget, variant?: ShapeVariantName | "auto"): Shape {
-	if (variant && variant !== "auto") return priceShape(SHAPE_VARIANTS[variant], model);
+	if (variant && variant !== "auto") return priceShape(fitHostImageEdge(SHAPE_VARIANTS[variant], model), model);
 	const ideal = model?.id ? idealShapeVariant(model.id) : undefined;
 	const base = SHAPE_VARIANTS[ideal?.variant ?? FAMILY_VARIANT[apiFamily(model?.api)]];
-	return priceShape(ideal?.frameSize ? { ...base, frameSize: ideal.frameSize } : base, model);
+	return priceShape(fitHostImageEdge(ideal?.frameSize ? { ...base, frameSize: ideal.frameSize } : base, model), model);
+}
+
+/** Shrink `base` to the longest image edge `target`'s host passes to the model. */
+function fitHostImageEdge(base: ShapeGeometry, target: ShapeTarget | undefined): ShapeGeometry {
+	const maxEdge = target ? resolveImageMaxEdge(target) : undefined;
+	return maxEdge !== undefined && base.frameSize > maxEdge ? { ...base, frameSize: maxEdge } : base;
 }
 
 const CJK_HEAVY_MIN_WIDE_CHARS = 8;
@@ -577,6 +590,11 @@ export function providerImageBudget(model: Model | undefined): number {
 /** Archive frame cap for `model`: its image budget, never above {@link MAX_FRAMES_DEFAULT}. */
 export function providerFrameBudget(model: Model | undefined): number {
 	return Math.min(providerImageBudget(model), MAX_FRAMES_DEFAULT);
+}
+
+/** Whether `model` may get a fresh `read` result as frames (catalog `snapcompact-image-reads`, opt-in). */
+export function readerImagesReadResults(model: Model): boolean {
+	return resolveCatalogPolicy(model).snapcompactImageReads === true;
 }
 
 /** Key under `CompactionEntry.preserveData` holding the frame archive. */

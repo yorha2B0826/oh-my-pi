@@ -37,6 +37,9 @@ function imageModel(provider: string, api: Api, baseUrl: string, id: string): Mo
 }
 
 const ANTHROPIC_API = "https://api.anthropic.com";
+const ANTIGRAVITY_URL = "https://daily-cloudcode-pa.googleapis.com";
+const XAI_URL = "https://api.x.ai/v1";
+const CURSOR_URL = "https://api2.cursor.sh";
 
 function codex(baseUrl = CODEX_BASE_URL): Model {
 	return imageModel("openai-codex", "openai-codex-responses", baseUrl, "gpt-6.1-sol");
@@ -89,8 +92,28 @@ describe("image-count-budget", () => {
 			90,
 		],
 		["openrouter", "openrouter", "https://openrouter.ai/api/v1", "anthropic/claude-opus-5.5", 90],
+		["google-antigravity", "google-gemini-cli", ANTIGRAVITY_URL, "gemini-3.7-flash", 60],
+		["xai-oauth", "openai-responses", XAI_URL, "grok-4.7", 60],
+		["xai", "openai-responses", XAI_URL, "grok-4.6", 60],
+		["cursor", "cursor-agent", CURSOR_URL, "gpt-5.5", 60],
 	] as const)("%s carries its budget", (provider, api, baseUrl, id, budget) => {
 		expect(imageCountBudget(imageModel(provider, api, baseUrl, id))).toBe(budget);
+	});
+
+	test("Claude on Antigravity and Cursor, and Cursor's default route, carry Claude's 20-image many-image limit", () => {
+		for (const [provider, api, baseUrl, id] of [
+			["google-antigravity", "google-gemini-cli", ANTIGRAVITY_URL, "claude-sonnet-4-6"],
+			["google-antigravity", "google-gemini-cli", ANTIGRAVITY_URL, "claude-opus-5-5"],
+			["cursor", "cursor-agent", CURSOR_URL, "claude-opus-5-high"],
+			["cursor", "cursor-agent", CURSOR_URL, "claude-4.5-sonnet"],
+			["cursor", "cursor-agent", CURSOR_URL, "default"],
+		] as const) {
+			expect({ provider, id, budget: imageCountBudget(imageModel(provider, api, baseUrl, id)) }).toEqual({
+				provider,
+				id,
+				budget: 20,
+			});
+		}
 	});
 
 	test("an unlisted host has no budget", () => {
