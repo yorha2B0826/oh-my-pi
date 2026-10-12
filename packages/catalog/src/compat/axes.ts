@@ -244,8 +244,8 @@ export const AXES: Readonly<Record<string, AxisDef>> = {
 	"first-party-provider": wire("firstPartyProvider", ["anthropic"]),
 	"honors-claude-code-beta-kill-switch": wire("honorsClaudeCodeBetaKillSwitch", ["anthropic"]),
 	"inject-claude-code-instruction": wire("injectClaudeCodeInstruction", ["anthropic"]),
-	"max-image-dimension": wire("maxImageDimension", ["anthropic"]),
-	"max-image-payload-bytes": wire("maxImagePayloadBytes", ["anthropic"]),
+	"max-image-dimension": wire("maxImageDimension", ["anthropic", "google"]),
+	"max-image-payload-bytes": wire("maxImagePayloadBytes", ["anthropic", "google"]),
 	"official-endpoint": wire("officialEndpoint", ["anthropic", "openai-responses"]),
 	"replay-unsigned-thinking": wire("replayUnsignedThinking", ["anthropic"]),
 	"requires-thinking-enabled": wire("requiresThinkingEnabled", ["anthropic"]),
@@ -405,6 +405,18 @@ export const AXES: Readonly<Record<string, AxisDef>> = {
 	"hosted-image": { key: "hostedImage", set: "catalog", shape: "scalar", values: [true, false] },
 	/** How the model line bills an input image; shape and formulas in `./image-tokenization`. */
 	"image-tokenization": { key: "imageTokenization", set: "catalog", shape: "object" },
+	/**
+	 * Most images one request may carry, documents included where the host
+	 * counts them. Unassigned: unknown host, held to a conservative floor.
+	 */
+	"image-count-budget": { key: "imageCountBudget", set: "catalog", shape: "scalar" },
+	/**
+	 * Replaces `image-count-budget` while the request reaches the official
+	 * endpoint (pi-ai `reachesOfficialEndpoint`): a limit measured or documented
+	 * for the host's own endpoint, which a custom `baseUrl` or an
+	 * `ANTHROPIC_BASE_URL`/`FOUNDRY_BASE_URL` reroute (proxy, gateway) need not share.
+	 */
+	"official-image-count-budget": { key: "officialImageCountBudget", set: "catalog", shape: "scalar" },
 	"image-model": { key: "imageModel", set: "catalog", shape: "scalar" },
 	"inline-image-byte-budget": { key: "inlineImageByteBudget", set: "catalog", shape: "scalar" },
 	/**

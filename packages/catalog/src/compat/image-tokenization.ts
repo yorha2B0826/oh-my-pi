@@ -37,12 +37,16 @@ export interface OpenAiPatchTokenization {
 }
 
 /** One model line's image billing rule: the vendor formula and its per-model numbers. */
-export type ImageTokenization =
+export type ImageTokenization = (
 	| OpenAiPatchTokenization
 	/** Anthropic 28px patches, resized to fit a padded-edge limit and a visual-token budget. */
 	| { regime: "anthropic-patch"; maxEdge: number; maxTokens: number }
 	/** A fixed per-image budget regardless of pixels (Gemini 3 `media_resolution`). */
-	| { regime: "fixed"; tokens: number };
+	| { regime: "fixed"; tokens: number }
+) & {
+	/** Provider billing was measured to match this rule; unset for docs-only rules and wire fallbacks. */
+	verified?: boolean;
+};
 
 /** A `class: "unknown"` identity for targets resolved by wire API alone. */
 const UNCLASSIFIED: Pick<ModelIdentity, "class"> = { class: "unknown" };

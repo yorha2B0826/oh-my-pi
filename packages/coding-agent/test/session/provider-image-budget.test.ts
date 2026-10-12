@@ -1,8 +1,11 @@
 import { describe, expect, it } from "bun:test";
 import type { Context, ImageContent, ModelSpec, TextContent } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import { toModelSpec } from "@oh-my-pi/pi-catalog/provider-models/bundled-references";
 import { decorateContextImages } from "@oh-my-pi/pi-coding-agent/blob-broker/context-images";
 import {
+	capArchiveFrameBytes,
 	clampProviderContextImageBytes,
 	clampProviderContextImages,
 } from "@oh-my-pi/pi-coding-agent/session/provider-image-budget";
@@ -47,6 +50,11 @@ const ANTHROPIC_SPEC: ModelSpec<"anthropic-messages"> = {
 };
 const ANTHROPIC_MODEL = buildModel(ANTHROPIC_SPEC);
 const ANTHROPIC_PROXY_MODEL = buildModel({ ...ANTHROPIC_SPEC, baseUrl: "https://anthropic-proxy.example.com" });
+const CODEX_MODEL = getBundledModel("openai-codex", "gpt-6.1-sol");
+const CODEX_PROXY_MODEL = buildModel({
+	...toModelSpec(CODEX_MODEL),
+	baseUrl: "https://codex-proxy.example/backend-api",
+});
 // A base64 character occupies one byte in Anthropic's JSON request body.
 const HALF_ANTHROPIC_IMAGE_BUDGET = "A".repeat(12_000_000);
 
@@ -101,6 +109,27 @@ describe("provider context image budgets", () => {
 		expect(textData(clamped)).toEqual(Array.from({ length: 31 }, (_, index) => `text-${index}`));
 		expect(clamped).not.toBe(context);
 		expect(imageData(context)).toEqual(Array.from({ length: 31 }, (_, index) => `image-${index}`));
+	});
+
+	it.each([
+		["the official Anthropic API", ANTHROPIC_MODEL, 600],
+		["an Anthropic proxy", ANTHROPIC_PROXY_MODEL, 90],
+		["the official Codex backend", CODEX_MODEL, 2000],
+		["a Codex proxy", CODEX_PROXY_MODEL, 200],
+	] as const)("keeps the newest images up to the count %s allows", (_label, model, budget) => {
+		const context: Context = {
+			systemPrompt: [],
+			tools: [],
+			messages: Array.from({ length: budget + 1 }, (_, index) => ({
+				role: "user",
+				content: [image(`image-${index}`)],
+				timestamp: index,
+			})),
+		};
+
+		const clamped = clampProviderContextImages(context, model);
+
+		expect(imageData(clamped)).toEqual(Array.from({ length: budget }, (_, index) => `image-${index + 1}`));
 	});
 
 	it("keeps image-only tool results meaningful when every image block is dropped", () => {
@@ -422,6 +451,54 @@ describe("provider context image budgets", () => {
 		expect(clampProviderContextImageBytes(context, { ...ANTHROPIC_MODEL, input: ["text"] })).toBe(context);
 	});
 
+	it.each([
+		["ANTHROPIC_BASE_URL", { ANTHROPIC_BASE_URL: "https://anthropic-proxy.example/v1" }],
+		[
+			"Foundry's FOUNDRY_BASE_URL",
+			{ CLAUDE_CODE_USE_FOUNDRY: "1", FOUNDRY_BASE_URL: "https://foundry-proxy.example" },
+		],
+	] as const)("does not apply Anthropic's byte policy to an official model rerouted by %s", (_, reroute) => {
+		const frame = (fill: string) => image(fill.repeat(1_600_000));
+		const context: Context = {
+			systemPrompt: [],
+			tools: [],
+			messages: [
+				{
+					role: "user",
+					content: [text("summary"), frame("A"), frame("B"), frame("C")],
+					historyRewriteAt: 1,
+					timestamp: 0,
+				},
+				{
+					role: "user",
+					content: [image(HALF_ANTHROPIC_IMAGE_BUDGET), image(HALF_ANTHROPIC_IMAGE_BUDGET)],
+					timestamp: 1,
+				},
+			],
+		};
+		const keys = ["ANTHROPIC_BASE_URL", "CLAUDE_CODE_USE_FOUNDRY", "FOUNDRY_BASE_URL"] as const;
+		const previous = keys.map(key => [key, Bun.env[key]] as const);
+		try {
+			for (const key of keys) delete Bun.env[key];
+			expect(clampProviderContextImageBytes(context, ANTHROPIC_MODEL)).not.toBe(context);
+			expect(capArchiveFrameBytes(context, ANTHROPIC_MODEL)).toBe(context);
+			Object.assign(Bun.env, reroute);
+			expect(clampProviderContextImageBytes(context, ANTHROPIC_MODEL)).toBe(context);
+			// The proxy's 3 MB frame budget keeps only the newest frame.
+			const capped = capArchiveFrameBytes(context, ANTHROPIC_MODEL);
+			expect(imageData(capped)).toEqual([
+				"C".repeat(1_600_000),
+				HALF_ANTHROPIC_IMAGE_BUDGET,
+				HALF_ANTHROPIC_IMAGE_BUDGET,
+			]);
+		} finally {
+			for (const [key, value] of previous) {
+				if (value === undefined) delete Bun.env[key];
+				else Bun.env[key] = value;
+			}
+		}
+	});
+
 	it("keeps images that URL decoration moved off the inline wire", () => {
 		const context: Context = {
 			systemPrompt: [],
@@ -455,5 +532,31 @@ describe("provider context image budgets", () => {
 		};
 
 		expect(clampProviderContextImages(context, UMANS_MODEL)).toBe(context);
+	});
+
+	it("caps summary archive frames at the request model's frame budget and leaves other images alone", () => {
+		const frame = (fill: string) => image(fill.repeat(1_600_000));
+		const context: Context = {
+			systemPrompt: [],
+			tools: [],
+			messages: [
+				{
+					role: "user",
+					content: [text("summary"), frame("A"), frame("B"), frame("C"), text("tail")],
+					historyRewriteAt: 1,
+					timestamp: 1,
+				},
+				{ role: "user", content: [text("screenshot"), frame("D")], timestamp: 2 },
+			],
+		};
+
+		const capped = capArchiveFrameBytes(context, ANTHROPIC_PROXY_MODEL);
+
+		expect(imageData(capped).map(data => data[0])).toEqual(["C", "D"]);
+		const [summary] = capped.messages;
+		if (summary?.role !== "user" || !Array.isArray(summary.content)) throw new Error("Expected the summary message");
+		expect(summary.content.map(block => block.type)).toEqual(["text", "text", "image", "text"]);
+		expect(textData(capped)).toContainEqual(expect.stringContaining("2 archived image frames could not be included"));
+		expect(capArchiveFrameBytes(context, ANTHROPIC_MODEL)).toBe(context);
 	});
 });

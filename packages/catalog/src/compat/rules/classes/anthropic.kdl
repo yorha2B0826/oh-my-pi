@@ -16,8 +16,10 @@
 // https://platform.claude.com/docs/en/build-with-claude/prompt-caching
 class "anthropic" {
 	prompt-cache-lookback 20
+	// verified: billing matched this formula on Opus 4.7+ and Fable 5.1.
 	image-tokenization {
 		regime "anthropic-patch"
+		verified #true
 		max-edge 2576
 		max-tokens 4784
 	}

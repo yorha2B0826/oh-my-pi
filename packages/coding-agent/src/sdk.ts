@@ -39,6 +39,7 @@ import * as postmortem from "@oh-my-pi/pi-utils/postmortem";
 import * as prompt from "@oh-my-pi/pi-utils/prompt";
 import { Snowflake } from "@oh-my-pi/pi-utils/snowflake";
 import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
+import { DEFAULT_FRAME_DATA_BYTES_BUDGET, frameDataBytesBudget } from "@oh-my-pi/snapcompact";
 import {
 	discoverAdvisorConfigs,
 	discoverWatchdogFiles,
@@ -201,6 +202,7 @@ import {
 	wrapSteeringForModel,
 } from "./session/messages";
 import {
+	capArchiveFrameBytes,
 	clampProviderContextImageBytes,
 	clampProviderContextImages,
 	dropUnreadableContextImages,
@@ -4195,6 +4197,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		);
 		const transformProviderContext = async (context: Context, transformModel: Model): Promise<Context> => {
 			let transformed = obfuscator ? obfuscateProviderContext(obfuscator, context) : context;
+			// The archive was sized for the model active at the last context build; a model switch may have lowered the budget.
+			transformed = capArchiveFrameBytes(transformed, transformModel);
 			transformed = await snapcompactInline.transform(transformed, transformModel);
 			transformed = clampProviderContextImages(transformed, transformModel);
 			transformed = await normalizeProviderContextImagesForModel(transformed, transformModel);
@@ -4437,7 +4441,17 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 
 		// Restore messages if session has existing data
 		if (hasExistingSession) {
-			agent.replaceMessages(existingSession.messages);
+			// The restore above built its context at the default frame payload budget, before the session
+			// model was known; rebuild only when that model's budget differs.
+			const frameBudget = frameDataBytesBudget(model);
+			const restored =
+				frameBudget === DEFAULT_FRAME_DATA_BYTES_BUDGET
+					? existingSession
+					: deobfuscateSessionContext(
+							sessionManager.buildSessionContext({ maxFrameDataBytes: frameBudget }),
+							obfuscator,
+						);
+			agent.replaceMessages(restored.messages);
 			if (persistInitialServiceTier) {
 				sessionManager.appendServiceTierChange(
 					Object.keys(initialServiceTierByFamily).length > 0 ? initialServiceTierByFamily : null,
@@ -5170,6 +5184,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					transformContext: async messages => wrapSteeringForModel(messages),
 					transformProviderContext: async (context, transformModel) => {
 						let transformed = obfuscator ? obfuscateProviderContext(obfuscator, context) : context;
+						transformed = capArchiveFrameBytes(transformed, transformModel);
 						transformed = clampProviderContextImages(transformed, transformModel);
 						transformed = await normalizeProviderContextImagesForModel(transformed, transformModel);
 						transformed = await dropUnreadableContextImages(transformed, transformModel);

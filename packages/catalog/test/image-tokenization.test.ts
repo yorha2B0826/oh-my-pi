@@ -9,7 +9,9 @@ import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { isRecord } from "@oh-my-pi/pi-utils/type-guards";
 import rules from "../src/compat/rules.json";
 
-const HIRES: ImageTokenization = { regime: "anthropic-patch", maxEdge: 2576, maxTokens: 4784 };
+const HIRES: ImageTokenization = { regime: "anthropic-patch", verified: true, maxEdge: 2576, maxTokens: 4784 };
+/** The Anthropic-wire fallback: the high-res numbers, unmeasured for the readers it prices. */
+const HIRES_FALLBACK: ImageTokenization = { regime: "anthropic-patch", maxEdge: 2576, maxTokens: 4784 };
 const STANDARD: ImageTokenization = { regime: "anthropic-patch", maxEdge: 1568, maxTokens: 1568 };
 /** GPT-5.5's sizing; `auto` sizes like `original`. */
 const GPT_PATCH: ImageTokenization = {
@@ -107,6 +109,21 @@ describe("resolveImageTokenization", () => {
 		}
 	});
 
+	it("marks the GPT rules measured against Codex billing as verified", () => {
+		for (const id of ["gpt-6-astra", "gpt-6.1-sol", "gpt-5.6-luna", "gpt-5.5", "gpt-daybreak-blue-latest"]) {
+			expect(ruleFor("openai-codex", id).verified).toBe(true);
+		}
+		// gpt-5.4 and older follow the guide without a billing probe.
+		expect(ruleFor("openai", "gpt-5.4").verified).toBeUndefined();
+		expect(ruleFor("openai-codex", "gpt-5.3-codex").verified).toBeUndefined();
+		// Lines after 6.1 size like gpt-5.6 but are not measured yet.
+		for (const id of ["gpt-6.2-sol", "gpt-7-luna"]) {
+			const rule = ruleFor("openai-codex", id);
+			expect(rule.verified).toBeUndefined();
+			expect(imageTokens(rule, { width: 1568, height: 1562 }, "original")).toBe(2882);
+		}
+	});
+
 	it("sizes each detail level the way the guide lists for that model", () => {
 		const astra = ruleFor("openai", "gpt-6-astra");
 		// Guide example: astra `high` keeps a 4096×512 image (65,535px limit).
@@ -153,8 +170,12 @@ describe("resolveImageTokenization", () => {
 			});
 		}
 		for (const api of ["anthropic-messages", "bedrock-converse-stream", "openrouter", "ollama-chat"]) {
-			expect(resolveImageTokenization({ api, id: "qwen/qwen3-vl" })).toEqual(HIRES);
+			expect(resolveImageTokenization({ api, id: "qwen/qwen3-vl" })).toEqual(HIRES_FALLBACK);
 		}
+		// Grok has no lineage rule: xAI's OpenAI-compatible wire prices it as GPT.
+		const grok = getBundledModel("xai", "grok-4");
+		if (!grok) throw new Error("Expected bundled xai/grok-4");
+		expect(resolveImageTokenization(grok)).toEqual(GPT_PATCH);
 		// The lineage rule wins over the wire carrying it.
 		expect(
 			resolveImageTokenization({

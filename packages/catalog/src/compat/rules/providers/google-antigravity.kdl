@@ -26,6 +26,14 @@ provider "google-antigravity" {
 	preserves-max-output-tokens #false
 
 	class "anthropic" {
+		// Claude here is Vertex Anthropic: one image whose base64 passes
+		// 5,242,880 bytes is a 400 "image exceeds 5 MB maximum" (half the
+		// direct API's 10 MiB), and 8001 px is a 400 like on the direct API.
+		// Declaring the contract makes the Cloud Code Assist wire clamp images
+		// for Claude the way `anthropic-messages` does; Gemini on the same
+		// gateway has no such limits and keeps them unset.
+		max-image-dimension 8000
+		max-image-payload-bytes 5242880
 		family "opus" {
 			thinking-mode "budget"
 		}
