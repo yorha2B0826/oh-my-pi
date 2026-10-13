@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Background task guidance now lives in the Task tool description (and in same-name extension replacements that delegate to Task) instead of being repeated in every spawn acknowledgment ([#15477](https://github.com/can1357/oh-my-pi/pull/15477) by [@iliaal](https://github.com/iliaal))
+
 ## [18.10.4] - 2026-10-13
 
 ### Added
