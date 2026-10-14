@@ -216,6 +216,7 @@ import {
 	resolveRetryFallbackChainKey,
 } from "./session/retry-fallback-chains";
 import { describeUsageFallback } from "./session/retry-fallback-reason";
+import { loadRuntimeIdentity } from "./session/runtime-identity";
 import { getRestorableSessionModels } from "./session/session-context";
 import { SessionManager } from "./session/session-manager";
 import {
@@ -1691,6 +1692,7 @@ export function createAutoLearnCaptureRunner(
  */
 export async function createAgentSession(options: CreateAgentSessionOptions = {}): Promise<CreateAgentSessionResult> {
 	registerLocalInferenceApi();
+	await loadRuntimeIdentity();
 	const extensionRoots = options.extensionRoots?.();
 	const explicit = extensionRoots?.explicit ?? options.additionalExtensionPaths ?? [];
 	const mode = extensionRoots?.mode ?? (options.disableExtensionDiscovery ? "explicit-only" : "merge");
