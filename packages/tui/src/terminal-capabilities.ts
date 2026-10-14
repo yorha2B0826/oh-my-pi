@@ -16,7 +16,7 @@ import {
 	terminalMultiplexerForTerm,
 	terminalMultiplexerSessions,
 } from "./terminal-multiplexer";
-import { resolveTmuxClientTerminalName, wrapTmuxPassthroughIfNeeded } from "./tmux";
+import { resolveTmuxClientTerminalNames, wrapTmuxPassthroughIfNeeded } from "./tmux";
 import type { HangulCompatibilityJamoWidth } from "./utils";
 
 export * from "./terminal-multiplexer";
@@ -469,9 +469,10 @@ function getFallbackImageProtocol(
 	if (!isTTY) return null;
 	if (terminalId === "vscode" || terminalId === "alacritty") return null;
 	const term = env.TERM?.toLowerCase() ?? "";
-	if (term.includes("screen") || term.includes("tmux") || term.includes("ghostty")) {
-		return ImageProtocol.Kitty;
-	}
+	// tmux TERM names the pane, not the attached client's graphics support.
+	// Leave unknown clients unselected so the runtime SIXEL probe can run.
+	if (env.TMUX || term.includes("tmux")) return null;
+	if (term.includes("screen") || term.includes("ghostty")) return ImageProtocol.Kitty;
 	return null;
 }
 /**
@@ -661,9 +662,11 @@ export function detectTerminalId(env: NodeJS.ProcessEnv = Bun.env): TerminalId {
 	if (programId) return programId;
 
 	// tmux >= 3.2 replaces the pane's identity with `TERM_PROGRAM=tmux`.
-	// Its server still holds the attached client's terminal-type reply.
-	const clientProgramId = fromProgram(resolveTmuxClientTerminalName(env) ?? undefined);
-	if (clientProgramId) return clientProgramId;
+	// Its server still holds the attached client's terminal-type reply and TERM.
+	for (const clientProgram of resolveTmuxClientTerminalNames(env)) {
+		const clientProgramId = fromProgram(clientProgram);
+		if (clientProgramId) return clientProgramId;
+	}
 
 	if (TERM?.toLowerCase().includes("ghostty")) return "ghostty";
 	if (TERM && caseEq(TERM, "monstar")) return "monstar";
