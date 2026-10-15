@@ -31,7 +31,14 @@ import {
 	unsupportedProxyMessage,
 	withTimeoutSignal,
 } from "../utils/fetch-timeout";
-import { type BuildAnswer, type BuildPatch, type Fetch, fetchBuild, type UpdateChannel } from "./build-service";
+import {
+	type BuildAnswer,
+	type BuildPatch,
+	currentBuildHost,
+	type Fetch,
+	fetchBuild,
+	type UpdateChannel,
+} from "./build-service";
 
 import { DEFAULT_NPM_REGISTRY, type NpmRegistryResolver } from "./npm-registry";
 
@@ -1053,8 +1060,13 @@ async function isNativeExecutable(filePath: string): Promise<boolean> {
  * `targetPath` reports when it is a native executable, else the running
  * build's. A patch is applied only to a file whose SHA-256 is the patch's
  * base, so a wrong guess costs a whole-file download, never a broken install.
+ *
+ * Fork build: exported because this fork updates from its own GitHub releases
+ * (`fetchForkBuild`, which has no patch to name a from_version for) and no
+ * longer calls it — exporting keeps upstream merges edit-only instead of
+ * delete/modify conflicts.
  */
-async function installedBuildVersion(targetPath: string): Promise<string> {
+export async function installedBuildVersion(targetPath: string): Promise<string> {
 	const real = tryRealpath(targetPath);
 	if (isCompiledBinary() && real !== undefined && real === tryRealpath(process.execPath)) return VERSION;
 	if (!(await isNativeExecutable(targetPath))) return VERSION;
@@ -2043,6 +2055,51 @@ function announceOffer(version: string, request: UpdateRequest): boolean {
 }
 
 /**
+ * Fork build: this fork publishes its binaries as GitHub release assets
+ * (`omp-<os>-<arch>` plus `SHA256SUMS.txt`) instead of Stencil's build service,
+ * so a compiled fork install must never be updated from that service — that
+ * would replace the fork build with an upstream one and drop the fork
+ * customizations. Answers in the same shape ({@link BuildAnswer}) so the
+ * existing download/verify/replace path is reused unchanged.
+ */
+export async function fetchForkBuild(channel: UpdateChannel): Promise<BuildAnswer> {
+	const release = await getLatestRelease({ timeoutMs: RELEASE_METADATA_TIMEOUT_MS, channel });
+	const host = await currentBuildHost();
+	const base = `https://github.com/${REPO}/releases/download/${release.tag}`;
+	const assetUrl = `${base}/${host.fileName}`;
+
+	const sumsResponse = await fetch(`${base}/SHA256SUMS.txt`, {
+		redirect: "follow",
+		signal: withTimeoutSignal(RELEASE_METADATA_TIMEOUT_MS),
+	});
+	if (!sumsResponse.ok) {
+		throw new Error(
+			`Failed to fetch ${REPO} ${release.tag} checksums: ${sumsResponse.status} ${sumsResponse.statusText}`,
+		);
+	}
+	const line = (await sumsResponse.text())
+		.split("\n")
+		.map(entry => entry.trim())
+		.find(entry => entry.split(/\s+/).pop() === host.fileName);
+	if (!line) throw new Error(`${host.fileName} is missing from ${release.tag} SHA256SUMS.txt`);
+	const sha256 = (line.split(/\s+/)[0] ?? "").toLowerCase();
+
+	const head = await fetch(assetUrl, {
+		method: "HEAD",
+		redirect: "follow",
+		signal: withTimeoutSignal(RELEASE_METADATA_TIMEOUT_MS),
+	});
+	if (!head.ok) {
+		throw new Error(`Failed to fetch ${release.tag} ${host.fileName}: ${head.status} ${head.statusText}`);
+	}
+	const size = Number(head.headers.get("content-length"));
+	if (!Number.isSafeInteger(size) || size <= 0) {
+		throw new Error(`${release.tag} ${host.fileName}: missing content-length`);
+	}
+	return { version: release.version, file: { name: host.fileName, size, sha256 }, download: assetUrl };
+}
+
+/**
  * Update a standalone binary install from the build service: the newest build
  * on the channel, asked with the installed version so the answer can carry a
  * patch from it. npm is never consulted.
@@ -2054,8 +2111,8 @@ async function runBinaryUpdate(
 ): Promise<void> {
 	let build: BuildAnswer;
 	try {
-		const fromVersion = target ? await installedBuildVersion(target.path) : VERSION;
-		build = await fetchBuild({ channel: request.channel }, { fromVersion });
+		// Fork build: always this fork's GitHub release, never the upstream build service.
+		build = await fetchForkBuild(request.channel);
 	} catch (err) {
 		console.error(chalk.red(`Failed to check for updates: ${err}`));
 		process.exit(1);
@@ -2089,8 +2146,8 @@ async function updateToStandaloneBinary(
 	channel: UpdateChannel,
 ): Promise<void> {
 	const target = await resolveUpdateTarget({ allowPackageManagers: false });
-	const fromVersion = target.method === "binary" ? await installedBuildVersion(target.path) : VERSION;
-	const build = await fetchBuild({ channel }, { fromVersion });
+	// Fork build: the standalone binary comes from this fork's GitHub release.
+	const build = await fetchForkBuild(channel);
 	if (compareVersions(build.version, release.version) < 0 && compareVersions(build.version, VERSION) <= 0) {
 		throw new Error(
 			`${release.version} ships as a standalone binary, but the newest ${channel} build of it published for this platform is ${build.version}; retry in a few minutes once it finishes uploading, or reinstall with: ${installerHint()}`,
