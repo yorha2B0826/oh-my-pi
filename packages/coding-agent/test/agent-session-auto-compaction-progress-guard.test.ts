@@ -9,11 +9,13 @@ import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { runPrintMode } from "@oh-my-pi/pi-coding-agent/modes/print-mode";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import type { CompactionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { INCOMPLETE_RECOVERY_MAX_RETRIES } from "@oh-my-pi/pi-coding-agent/session/session-maintenance";
+import * as telemetryExport from "../src/telemetry-export";
 
 import {
 	cfgCompactionAsyncEnabled,
@@ -88,6 +90,8 @@ describe("AgentSession auto-compaction progress guard", () => {
 		// while returning the same short-circuit result without compiling a
 		// temporary extension for every test.
 		const extensionRunner = {
+			initialize: () => {},
+			onError: () => {},
 			hasHandlers: (type: string) => compactHookEnabled && type === "session_before_compact",
 			emit: async (event: {
 				type: string;
@@ -1146,7 +1150,9 @@ describe("AgentSession auto-compaction progress guard", () => {
 		// The capped path appends no successor after dropping the failed turn. Reopen
 		// the journal to prove the durable branch marker, rather than the discarded
 		// physical leaf, selects the active branch after a process restart.
-		await session.dispose();
+		vi.spyOn(telemetryExport, "flushTelemetryExport").mockResolvedValue();
+		const printModeExitCode = await runPrintMode(session, { mode: "json" });
+		expect(printModeExitCode).toBe(1);
 		const reloaded = await SessionManager.open(sessionFile, sessionDir);
 		expect(reloaded.getBranch()).not.toContainEqual(
 			expect.objectContaining({

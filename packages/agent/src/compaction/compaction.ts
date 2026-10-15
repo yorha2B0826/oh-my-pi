@@ -34,6 +34,7 @@ import {
 import type { InputItem as CodexInputItem } from "@oh-my-pi/pi-ai/providers/openai-codex/request-transformer";
 import { convertTools } from "@oh-my-pi/pi-ai/providers/openai-responses";
 import { buildResponsesInput, resolveOpenAICompatPolicy } from "@oh-my-pi/pi-ai/providers/openai-shared";
+import { isSurvivingAssistant } from "@oh-my-pi/pi-ai/providers/transform-messages";
 import { stripOpenAIResponsesOutputOnlyStatusesForReplay } from "@oh-my-pi/pi-ai/utils";
 import { preferredDialect } from "@oh-my-pi/pi-catalog/identity";
 import { clampThinkingLevelForModel } from "@oh-my-pi/pi-catalog/model-thinking";
@@ -535,13 +536,23 @@ export function findCutPoint(
 	// belonging to an assistant. Checking individual messages can either retain
 	// the oversized older assistant or miss its boundary and retain all history.
 	let accumulatedTokens = 0;
+	// The latest surviving assistant turn replays byte-for-byte, signatures of
+	// abandoned tool calls included, so it is counted as the latest.
+	let latestTurnIndex = -1;
+	for (let i = entries.length - 1; i >= 0 && latestTurnIndex < 0; i--) {
+		const message = getMessageFromEntry(entries[i]);
+		if (message?.role === "assistant" && isSurvivingAssistant(message)) latestTurnIndex = i;
+	}
 	let cutPointIndex = cutPoints.length - 1;
 	let cutIndex = cutPoints[cutPointIndex];
 
 	for (let i = endIndex - 1; i >= startIndex; i--) {
 		const entry = entries[i];
 		const message = getMessageFromEntry(entry);
-		if (message) accumulatedTokens += tokenizer.countMessage(message);
+		if (message) {
+			accumulatedTokens +=
+				i === latestTurnIndex ? tokenizer.countLatestTurn(message) : tokenizer.countMessage(message);
+		}
 		if (i !== cutPoints[cutPointIndex]) continue;
 		if (accumulatedTokens > keepRecentTokens) break;
 		cutIndex = i;

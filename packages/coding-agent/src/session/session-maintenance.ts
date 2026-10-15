@@ -249,19 +249,6 @@ function hasExplicitMediaRejectionEvidence(errorMessage: string | undefined): bo
 	return errorMessage !== undefined && PAYLOAD_MEDIA_LIMIT_EVIDENCE_PATTERN.test(errorMessage);
 }
 
-/**
- * User-facing notice for a compaction dead end: maintenance freed too little
- * to retry safely. `remedies` names the recovery actions left on the emitting
- * path — by the time the post-pass dead end fires, the tiered rescue has
- * already attempted both elide and image-drop automatically.
- */
-function compactionDeadEndWarning(remedies: string): string {
-	return (
-		"Compaction freed too little context to make progress — pausing automatic maintenance to avoid a compaction loop. " +
-		`The most recent turn alone is too large to reduce further; ${remedies} or switch to a larger-context model.`
-	);
-}
-
 /** A terminal payload rejection may be byte-sized history or irreducible media, not necessarily token overflow. */
 function payloadRejectionNotice(storedTokens: number, contextWindow: number): string {
 	const remedies =
@@ -1876,7 +1863,7 @@ export class SessionMaintenance {
 				detachPostCommit,
 			);
 			if (!safeToContinue) {
-				const warning = compactionDeadEndWarning("clear large tool output");
+				const warning = this.#compactionDeadEndWarning("clear large tool output");
 				const entry = getLatestCompactionEntry(this.#host.sessionManager.getBranch());
 				if (entry) {
 					entry.warning = warning;
@@ -4000,6 +3987,31 @@ export class SessionMaintenance {
 		});
 	}
 
+	#compactionDeadEndWarning(remedies: string): string {
+		const contextWindow = this.#model?.contextWindow ?? 0;
+		if (contextWindow > 0) {
+			const recoveryBand = Math.floor(
+				resolveThresholdTokens(contextWindow, this.#compactionSettings) * COMPACTION_RECOVERY_BAND,
+			);
+			const overhead = computeNonMessageTokens(
+				this.#host.nonMessageTokenSource(),
+				this.#tokenizer,
+				this.#host.settings.revision,
+			);
+			if (overhead > recoveryBand) {
+				return (
+					"Compaction cannot create headroom — pausing automatic maintenance. " +
+					"The system prompt and always-sent tool schemas alone exceed the recovery band; " +
+					"reduce fixed context or adjust compaction.modelThresholds."
+				);
+			}
+		}
+		return (
+			"Compaction freed too little context to make progress — pausing automatic maintenance to avoid a compaction loop. " +
+			`The most recent turn alone is too large to reduce further; ${remedies} or switch to a larger-context model.`
+		);
+	}
+
 	/**
 	 * Post-maintenance progress check for the context-full / snapcompact tail.
 	 *
@@ -4919,7 +4931,7 @@ export class SessionMaintenance {
 							? (snapcompact.getPreservedArchive(frameRescueResult.preserveData)?.frames.length ?? 0)
 							: 0;
 					const deadEndWarning = noProgressDeadEnd
-						? compactionDeadEndWarning(
+						? this.#compactionDeadEndWarning(
 								this.#deadEndRemedies("shrink it (e.g. clear large tool output)", implicatedFrames),
 							)
 						: undefined;
@@ -5415,9 +5427,19 @@ export class SessionMaintenance {
 							// last candidate waits within the user's provider-wait cap
 							// (`retry.maxDelayMs`, 0 = uncapped); past it, the outer method
 							// cascade can still recover or report the failure (#15311).
+							// `retry.waitForUsageReset` opts into sleeping through a provider-
+							// stated usage-limit reset, as turn recovery does: only on the last
+							// candidate, only with the provider's own retry hint, and never
+							// longer than that hint.
+							const waitForUsageReset =
+								!hasMoreCandidates &&
+								retrySettings.waitForUsageReset === true &&
+								AIError.is(id, AIError.Flag.UsageLimit) &&
+								retryAfterMs !== undefined &&
+								delayMs <= retryAfterMs;
 							const maxAcceptableDelayMs = hasMoreCandidates
 								? 30_000
-								: retrySettings.maxDelayMs > 0
+								: retrySettings.maxDelayMs > 0 && !waitForUsageReset
 									? retrySettings.maxDelayMs
 									: Number.POSITIVE_INFINITY;
 							if (delayMs > maxAcceptableDelayMs) {
@@ -5704,7 +5726,7 @@ export class SessionMaintenance {
 			}
 		}
 
-		const deadEndWarning = noProgressDeadEnd ? compactionDeadEndWarning("clear large tool output") : undefined;
+		const deadEndWarning = noProgressDeadEnd ? this.#compactionDeadEndWarning("clear large tool output") : undefined;
 		if (deadEndWarning) {
 			// Stamp the divider: the compaction bar badges the dead-end and
 			// carries the full warning in its ctrl+o detail, so the pause
