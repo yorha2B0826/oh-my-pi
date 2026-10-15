@@ -124,7 +124,7 @@ import planModeCompactInstructionsPrompt from "../prompts/system/plan-mode-compa
 import type { AgentHubRegistry } from "@oh-my-pi/pi-tui/overlays/agent-hub-types";
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
 import { registerPersistedSubagents } from "../registry/persisted-agents";
-import type { AgentMetrics } from "@oh-my-pi/pi-tui/overlays/agent-hub-projection";
+import type { AgentCostSnapshot } from "@oh-my-pi/pi-tui/overlays/agent-hub-projection";
 import { sumSubagentTreeCost } from "./agent-hub-runtime";
 import {
 	type AgentSession,
@@ -1251,6 +1251,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		| ((tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager) => CustomEditor)
 		| undefined;
 	#composerStatusPersistTimer: NodeJS.Timeout | undefined;
+	readonly #initialComposerModel: Model | undefined;
 	readonly #judgmentBatchProgressHud = new JudgmentBatchProgressHud();
 	readonly #downloadActivityHud = new DownloadActivityHud(() => this.ui.requestRender());
 	readonly #judgmentBatchProgressClearTimers = new Map<string, NodeJS.Timeout>();
@@ -1735,7 +1736,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	#runningSubagentCount = 0;
 	#agentRegistryUnsubscribe?: () => void;
 	#agentRegistrySubscriptionTarget?: AgentHubRegistry;
-	#subagentSessionMetrics = new WeakMap<object, { metrics: AgentMetrics | undefined }>();
+	#subagentSessionCosts = new WeakMap<object, AgentCostSnapshot>();
 	#subagentCostHydratedRoot?: string;
 	#mcpStatusOrder: string[] = [];
 	#mcpPendingServers = new Set<string>();
@@ -1764,6 +1765,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.session = session;
 		this.sessionManager = session.sessionManager;
 		this.settings = session.settings;
+		this.#initialComposerModel = session.model;
 		const preferences = {
 			quiet: cfgStartupQuiet.get(settings),
 			composerShape: cfgComposerShape.get(settings),
@@ -3693,7 +3695,11 @@ export class InteractiveMode implements InteractiveModeContext {
 	 */
 	#persistComposerStatus(): void {
 		if (!this.sessionManager.getSessionFile()) return;
-		const model = this.session.model;
+		// Role changes affect the next fresh launch; session-only switches do not.
+		const initialModel = this.#initialComposerModel ?? this.session.model;
+		const model = this.settings.getModelRole("default")
+			? (this.session.resolveRoleModelWithThinking("default").model ?? initialModel)
+			: initialModel;
 		// Recover the border's ANSI wrapper by coloring a sentinel and splitting around it.
 		const marker = "\0";
 		const colored = this.editor.borderColor(marker);
@@ -3712,7 +3718,8 @@ export class InteractiveMode implements InteractiveModeContext {
 				model,
 				thinkingLevel: this.session.thinkingLevel,
 				autoThinking: this.session.isAutoThinking,
-				fastMode: this.session.isFastModeActive(),
+				// A fresh session derives tiers from settings, not this session's `/fast` toggles.
+				fastMode: model ? this.session.isFastModeConfiguredFor(model) : false,
 				usingSubscription: model ? this.session.modelRegistry.isUsingOAuth(model) : false,
 				autoCompactEnabled: this.session.autoCompactionEnabled,
 				compactionBoundaries: model?.contextWindow
@@ -3794,7 +3801,7 @@ export class InteractiveMode implements InteractiveModeContext {
 					refs: AgentRegistry.global().list(),
 					observers: this.#observerRegistry,
 					rootSessionFile,
-					sessionMetrics: this.#subagentSessionMetrics,
+					sessionCosts: this.#subagentSessionCosts,
 				}),
 			);
 		}
