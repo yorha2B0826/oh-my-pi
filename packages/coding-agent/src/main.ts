@@ -2654,6 +2654,7 @@ export async function runRootCommand(
 					setToolUIContext: mode === "rpc-ui" ? setToolUIContext : undefined,
 					headless: parsedArgs.noUi === true,
 					subagentEventBus,
+					mcpManager,
 					input: rpcInput,
 				});
 			} else if (isInteractive) {
