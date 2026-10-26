@@ -149,7 +149,7 @@ import { cfgGoalEnabled } from "./goals/settings";
 import { cfgPlanDefaultOnStartup, cfgPlanEnabled } from "./plan-mode/settings";
 
 import { cfgAdvisorEnabled } from "./advisor/settings";
-import { cfgToolsApprovalMode } from "./tools/settings";
+import { cfgAsyncPrintWake, cfgToolsApprovalMode } from "./tools/settings";
 import {
 	cfgAutocompleteMaxVisible,
 	cfgAutoResume,
@@ -2007,6 +2007,10 @@ export async function runRootCommand(
 		if (parsedArgs.advisor) {
 			cfgAdvisorEnabled.override(settingsInstance, true);
 		}
+		// Apply --wait-async CLI flag (ephemeral, not persisted); only print mode reads it
+		if (parsedArgs.waitAsync) {
+			cfgAsyncPrintWake.override(settingsInstance, true);
+		}
 		// Apply --external-thinking CLI flag (ephemeral, not persisted)
 		if (parsedArgs.externalThinking) {
 			cfgExternalThinking.override(settingsInstance, true);
@@ -2746,6 +2750,7 @@ export async function runRootCommand(
 					printThoughts: initialArgs.printThoughts,
 					planYolo: parsedArgs.planYolo,
 					mcpManager,
+					deadline: sessionOptions.deadline,
 				});
 				if ($env.PI_TIMING) {
 					logger.printTimings();
