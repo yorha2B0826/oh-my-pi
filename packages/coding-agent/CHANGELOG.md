@@ -4,6 +4,7 @@
 
 ### Added
 
+- The agent can reply mid-task without ending its turn by writing Markdown to `out://` (`write`, or `> out://` from bash, up to 64 KiB): the reply shows like a response, streaming as it is written, so answering a question you ask during work or a requested progress report no longer cuts the task short. On by default in the interactive TUI and off in print, RPC, and ACP sessions; set `out.enabled` to force it either way
 - Added opt-in `taskFile` input (`task.file=true`) to dispatch subagent instructions from a UTF-8 file via an absolute path or `local://` URL, recording the submitted path and SHA-256 ([#17133](https://github.com/can1357/oh-my-pi/pull/17133) by [@iliaal](https://github.com/iliaal)).
 - Pin and unpin sessions from the resume picker with `Alt+K` / `Alt+Shift+K` (remappable as `app.session.pin` / `app.session.unpin`); pinned sessions move to the top at once and also lead search results ([#9837](https://github.com/can1357/oh-my-pi/pull/9837) by [@zhang17-24](https://github.com/zhang17-24))
 - Set `PI_LINK_SCHEME` (and optionally `PI_LINK_HOST`) to make file links in SSH/tmux sessions open through a desktop protocol handler such as `ompfile://<host>/<path>?line=N&col=M` ([#15855](https://github.com/can1357/oh-my-pi/pull/15855) by [@KunoLu](https://github.com/KunoLu))
@@ -13,10 +14,20 @@
 
 ### Changed
 
+- OpenAI live steering (`providers.openaiLiveSteering`) is now off by default for GPT models; typed messages wait for the next tool boundary unless you enable it, avoiding `unsupported_native_inflight_message` errors
+
+- Sub-session collector now determines compression from filename extension instead of a boolean flag
+- HTML exports now match the `/stats` design, with a higher-contrast light theme, timeline drawer, full trace view, and sidebar navigation for nested subagents and advisors
+- Packaged HTML exports load an integrity-pinned viewer and shared Markdown/highlighting libraries from `build.stencil.so` and `stencil.so`; source checkouts inline their generated viewer for local development. Session data stays in the file, but viewing needs network access
+- `tui.autoGraph` defaults to the new `auto`: charts are refined by the judge whenever the judge role resolves to a native TypeSafe jev model, and drawn from the built-in guess otherwise
+- Removed manual scan cache invalidation triggers after file modifications; filesystem changes are now automatically detected via timestamp validation in the new `pi-walker` architecture
 - A muted `/live` call now stays shown as muted when the voice model starts a task or the session starts, instead of switching to "working" or "listening" while the microphone is still off ([#17013](https://github.com/can1357/oh-my-pi/pull/17013) by [@materemias](https://github.com/materemias))
+- Model refreshes (startup, `/model`, toggling extended context) use far less CPU: unchanged models are no longer rebuilt on every pass, and with a custom agent directory or models config the model cache database is opened once per refresh instead of once per provider
+- Sloppy edits whose operations overlap (for example a block rewrite plus an `all` rename that touches it) now apply in order, each later operation matched against the earlier one's result, instead of rejecting the whole payload
 - `PI_INTENT_PROMPT` replaces the system-prompt guidance for the `i` intent field; `PI_INTENT_DESC` replaces its tool-schema description
 - Eval shows printed JSON text (`print(json.dumps(…))`, `console.log(JSON.stringify(…))`) as a collapsible JSON tree, like printed dicts and objects
 - The warning that a saved Codex or Claude rate-limit reset is about to expire now shows once per reset across all conversations and omp windows, and only in its final 6 hours instead of from 24 hours out; the status line keeps counting it down meanwhile
+- The `.`/`c` continue shortcut no longer adds a hidden "continue" directive when your last message is still unanswered (for example after pressing Esc before the model replied); the agent simply answers that message again
 
 ### Changed
 
@@ -25,6 +36,9 @@
 
 ### Fixed
 
+- Fixed table charts marking the worse value "best" when a column or row name suggests the wrong direction (a GPU's memory bandwidth and L2 cache read as costs). Charts no longer guess which way is better from header wording; under `tui.autoGraph: smart` the judge decides, for single-measure tables and every metric row too, and can decline a chart of page numbers, step numbers or figures quoted in prose
+- Fixed closing a browser tab while omp reattaches it after its worker exited taking most of a second longer than needed
+- Fixed startup warnings (`--model`, prewalk and `--plan-yolo` targets, a resumed session's folder that could not be opened) flashing in Tern before omp's UI covered them; they now show as warnings in the UI ([tern-sdk#90](https://github.com/stencil-hq/tern-sdk/issues/90))
 - Fixed Bash services failing to start with `ready.port must be an integer from 1 to 65535` when the model sent `port: 0` beside a `log` condition; a zero port now counts as unset
 - Fixed omp's title staying on the terminal tab after exit in terminals without a title stack; Windows consoles get their original title back ([#17321](https://github.com/can1357/oh-my-pi/pull/17321) by [@asuffield](https://github.com/asuffield))
 - Fixed cached approvals offering a directory grant that would not cover every target in the call ([#17309](https://github.com/can1357/oh-my-pi/pull/17309) by [@iliaal](https://github.com/iliaal)).
@@ -47,6 +61,7 @@
 - Fixed post-edit diagnostics showing "OK" or "no issues" when one of several language servers, or one file of a batched edit, had not reported yet ([#17293](https://github.com/can1357/oh-my-pi/pull/17293))
 - Fixed `lsp code_actions` passing diagnostics from an earlier version of a reopened file to quick-fix providers ([#17293](https://github.com/can1357/oh-my-pi/pull/17293))
 - Fixed `lsp diagnostics` getting no report from language servers that check files only on save ([#17293](https://github.com/can1357/oh-my-pi/pull/17293))
+- Fixed live job widgets on subagent and background-job cards filling with words from files, web pages and search results the subagent read (for example a grid of dots labelled `Given`, `Never`, `[x]`): wildcard rules no longer read a subagent's tool results, a widget is checked against all output before it shows and dropped as soon as it stops fitting, and grid statuses only colour a cell when they start a word
 
 ## [18.13.3] - 2026-10-28
 
