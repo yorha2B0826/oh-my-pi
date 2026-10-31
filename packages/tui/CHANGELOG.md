@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `iconButton()`, `quietButton()` and `segmentedTabs()` to `native/overlay`, and `disabled`, `busy` and `icon` options to `actionButton()`
+- Added `nativeTail` to `Composer.setRuntimeChildren` options: containers whose children continue the native surface's `main` after the transcript instead of riding in the dock
+
+### Changed
+
+- Grep and read results with gaps between line runs now render in Tern as one code block that scrolls sideways as a whole, with `…` gap rows aligned in the line-number gutter
+- Tern builds that draw the `button` kind get omp's buttons as real buttons (pointer cursor, accessible pressed/disabled state, a disabled button's tooltip says why) and segmented controls as `tabs` `variant: "segmented"`; older Tern builds keep the role-styled rows
+
+### Fixed
+
+- Fixed table charts plotting a ratio column against the timings it divides (`ratio` 0.997 beside `C++ (ms)` drew as "719× less"): `analyzeTable` reads a column equal to the quotient of two others as restating them, written bare or as `×`
+
 ## [18.14.1] - 2026-10-31
 
 ### Added
@@ -13,6 +27,7 @@
 - Fixed IME composition text in the BTW history `Follow up:` input appearing at the left edge instead of at the caret when the hardware cursor is enabled ([#17427](https://github.com/can1357/oh-my-pi/issues/17427))
 - Fixed session tree rows overlapping when messages, tool arguments, or labels contain carriage returns or Unicode line/paragraph separators (`U+2028`, `U+2029`), while keeping multiline formatting in the selected entry preview ([#17430](https://github.com/can1357/oh-my-pi/pull/17430) by [@lincicomb](https://github.com/lincicomb)).
 - Fixed the Background jobs sheet dropping a finished job and its output while you were reading it; the selected job now stays until you select another ([#17506](https://github.com/can1357/oh-my-pi/pull/17506) by [@H4vC](https://github.com/H4vC))
+- Fixed session tree user and assistant turns looking identical in themes whose `accent` and `success` colors match or nearly match (`dark-terminal`, `dark-poimandres`, `light-poimandres`): user rows are now bold, the `assistant:` label switches to the path color, and custom and advisor messages are muted ([#17520](https://github.com/can1357/oh-my-pi/pull/17520) by [@wolfiesch](https://github.com/wolfiesch))
 
 ## [18.14.0] - 2026-10-29
 
