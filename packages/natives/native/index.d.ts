@@ -3449,7 +3449,10 @@ export interface SearchResult {
 
 export declare function setHangulCompatJamoWidthOverride(value: number): void
 
-/** Options for executing a shell command via the embedded bash engine (pi-shell). */
+/**
+ * Options for executing a shell command via the embedded bash engine
+ * (pi-shell).
+ */
 export interface ShellExecuteOptions {
   /** Command string to execute in the shell. */
   command: string
