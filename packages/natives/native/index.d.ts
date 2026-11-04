@@ -1466,10 +1466,8 @@ export declare function countTokens(input: string | string[], encoding?: Encodin
 /**
  * Decode one complete SIXEL control string into a PNG on the calling thread.
  *
- * The decoder is deliberately bounded before handing the stream to
- * `icy_sixel`: raster declarations, repeats, and row advances are scanned
- * first so hostile dimensions cannot make the dependency allocate its much
- * larger internal maximum.
+ * Raster declarations, repeats, and row advances are bounded before allocating
+ * the decoded RGBA buffer.
  */
 export declare function decodeSixelToPng(bytes: Uint8Array): Uint8Array
 
@@ -3397,6 +3395,19 @@ export declare function renderMermaidAscii(text: string, options?: MermaidRender
  * JS-side re-encode.
  */
 export declare function renderSnapcompactPng(text: string, options: SnapcompactRenderOptions): Promise<string>
+
+/**
+ * Run the pi-shell engine as a process shell in this process (`omp zsh`,
+ * `omp bash`, `omp sh`): `argv` is the shell's whole command line,
+ * `argv[0]` naming it (`zsh`, `bash` or `sh` pick the dialect), as a real
+ * shell gets it. Synchronous: blocks the calling thread until the shell
+ * exits and returns the status the process should exit with (0–255; 101
+ * after a panic). The shell uses the process's own stdin, stdout, stderr,
+ * terminal and inherited descriptors (duplicated, never taken over); the
+ * job-control and termination signals the runtime handles are reset to
+ * their defaults for the run and restored after it.
+ */
+export declare function runShellMain(argv: Array<string>): number
 
 /**
  * Search content for a pattern (one-shot, compiles pattern each time).
