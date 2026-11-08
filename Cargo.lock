@@ -6406,7 +6406,7 @@ dependencies = [
 
 [[package]]
 name = "pi-iwan"
-version = "18.18.1"
+version = "18.18.2"
 dependencies = [
  "aes 0.8.4",
  "aes-gcm",
