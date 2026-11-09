@@ -26,6 +26,7 @@ import type { OAuthRequestIdentity } from "./auth/types";
 import { getEnvApiKey } from "./env-api-key";
 import * as AIError from "./error";
 import { ProviderHttpError } from "./error";
+import { assertProviderEnabled } from "./registry/oauth";
 import { isConcurrencyCapExclusion, isUsageLimitOutcome } from "./error/rate-limit";
 import { routeFetch as routeIwanFetch } from "./iwan/route";
 import type { BedrockOptions } from "./providers/amazon-bedrock";
@@ -856,6 +857,8 @@ function streamDispatch<TApi extends Api>(
 	options: OptionsForApi<TApi> | undefined,
 	limited: boolean,
 ): AssistantMessageEventStream {
+	// A provider turned off in its auth rules is never called, even with a key passed in directly.
+	assertProviderEnabled(model.provider);
 	const requestOptions = withSupportedSamplingParams(
 		model,
 		withTransportFetch(model, (options || {}) as StreamOptions),
