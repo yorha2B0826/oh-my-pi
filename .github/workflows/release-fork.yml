@@ -30,8 +30,12 @@ jobs:
                # pi_natives addon for x86_64-apple-darwin on arm64 is not worth
                # it for the Intel-Mac tail. The tap formula omits its on_intel
                # block accordingly.
+               # NB2: macos-14 was retired by GitHub on 2026-11-02 — jobs queued
+               # on it are auto-cancelled ~1s after run start (runner_id 0, no
+               # steps), which silently skipped "Publish GitHub release" on
+               # 2026-11-06 and 2026-11-11. Do not move this back to macos-14.
                - target_id: darwin-arm64
-                 runner: macos-14
+                 runner: macos-15
                - target_id: linux-x64
                  runner: ubuntu-22.04
                - target_id: linux-arm64
