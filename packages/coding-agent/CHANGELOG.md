@@ -2,20 +2,16 @@
 
 ## [Unreleased]
 
-### Fixed
-
-- Nix builds with `withAppleFm = false` no longer compile the Apple Foundation Models bridge with the host's Xcode ([#18911](https://github.com/can1357/oh-my-pi/pull/18911))
-- Apple Silicon Nix builds include Apple Foundation Models support instead of silently building without it ([#16584](https://github.com/can1357/oh-my-pi/pull/16584) by [@honsunrise](https://github.com/honsunrise))
-
-### Removed
-
-- Removed `/mcp smithery-search`, `/mcp smithery-login` and `/mcp smithery-logout`; Smithery shut down its API on October 31, 2026 ([#18822](https://github.com/can1357/oh-my-pi/pull/18822) by [@samettemizer](https://github.com/samettemizer))
+## [18.18.9] - 2026-11-11
 
 ### Added
 
+- Added Sofya as a web search engine (`web/sofya`), using `SOFYA_API_KEY` or a stored `sofya` credential ([#18185](https://github.com/can1357/oh-my-pi/pull/18185) by [@yusufgurdogan](https://github.com/yusufgurdogan))
 - Documented autoresearch mode in [docs/autoresearch.md](https://github.com/can1357/oh-my-pi/blob/main/docs/autoresearch.md): activation and its git gates, the three stop conditions, the per-segment iteration cap that defaults to none, the harness `METRIC`/`ASI` contract, and the on-disk store that `OMP_AUTORESEARCH_DB_DIR` relocates ([#18655](https://github.com/can1357/oh-my-pi/pull/18655) by [@sjawhar](https://github.com/sjawhar))
 - Extensions can import the form theme, the native span helpers (`styledSpans`, `compactText`, `rowsText` and the rest of the ANSI/span conversions), the `xd://` URL helpers (`parseXdUrl` and friends) and the `cfgExtensionTranscriptPresenters` setting handle from `@oh-my-pi/pi-coding-agent` instead of internal module paths, which stop the extension from loading when a file moves ([#18849](https://github.com/can1357/oh-my-pi/pull/18849) by [@materemias](https://github.com/materemias))
 - `/context` shows loaded instruction files and skills in their own categories; System Prompt marks where each one sits without counting it twice, and notes when an extension or SDK callback changed the prompt after it was built ([#17971](https://github.com/can1357/oh-my-pi/pull/17971) by [@c-w-z](https://github.com/c-w-z))
+- Added Hacker News search (`web/hackernews`): `web_search` queries scoped to `site:news.ycombinator.com` now search HN stories and comments through the keyless HN Search API before the configured engines
+
 ### Changed
 
 - A role edit in another omp instance no longer rewrites the `task` and `eval` tool descriptions of every running session, which was invalidating the Anthropic prompt cache from the tool definitions onward and dropping signed thinking blocks on prefix-bound models; the per-call model advertisement is now frozen into the base prompt surface and changes only when that surface rebuilds ([#18716](https://github.com/can1357/oh-my-pi/issues/18716), [#18732](https://github.com/can1357/oh-my-pi/pull/18732) by [@yuzu-octopus](https://github.com/yuzu-octopus))
@@ -25,6 +21,8 @@
 
 ### Fixed
 
+- Nix builds with `withAppleFm = false` no longer compile the Apple Foundation Models bridge with the host's Xcode ([#18911](https://github.com/can1357/oh-my-pi/pull/18911))
+- Apple Silicon Nix builds include Apple Foundation Models support instead of silently building without it ([#16584](https://github.com/can1357/oh-my-pi/pull/16584) by [@honsunrise](https://github.com/honsunrise))
 - On Windows, the bash tool runs external commands when omp itself runs in an AppContainer sandbox, instead of failing every one with `Permission denied` (exit 126) ([#18800](https://github.com/can1357/oh-my-pi/pull/18800) by [@devjay4561](https://github.com/devjay4561))
 - Explicit Bash prompt rules remain enforced in yolo mode when a command also matches a critical pattern ([#18788](https://github.com/can1357/oh-my-pi/pull/18788) by [@jasonharrison](https://github.com/jasonharrison)).
 - Fixed job widgets and captions failing outright when the `widget` model errors: they now try the role's next model (`retry.fallbackChains.widget`, else the built-in `smol` defaults) and fail only once every candidate has ([#18793](https://github.com/can1357/oh-my-pi/issues/18793))
@@ -46,11 +44,12 @@
 - `/tan` completion notices now quote the user's request and mark the result as the user's tangent, so the main agent no longer mistakes it for its own work
 - `omp zsh` with zsh-autosuggestions' `completion` strategy no longer echoes each typed key onto new lines: `vared` inside a `zpty` command now edits on the pty instead of the shell's terminal
 - An instruction file that leaves a code fence open has it closed at its end, so the rest of the system prompt is formatted as usual ([#17971](https://github.com/can1357/oh-my-pi/pull/17971) by [@c-w-z](https://github.com/c-w-z))
-
-### Fixed
-
 - Read-only activity stays visible after snap-compaction or another mid-turn transcript rebuild instead of leaving the UI stuck on “Working…” ([#18876](https://github.com/can1357/oh-my-pi/pull/18876) by [@JustasMasiulis](https://github.com/JustasMasiulis)).
 - With the Spotlight experiment on, a session now warns when Spotlight finds no Stencil credential, once each time the credential goes missing, and says how to sign in again; the `spotlight:shape` journal entry records failed Spotlight calls by cause (`failureCauses`) ([#18850](https://github.com/can1357/oh-my-pi/pull/18850) by [@wolfiesch](https://github.com/wolfiesch))
+
+### Removed
+
+- Removed `/mcp smithery-search`, `/mcp smithery-login` and `/mcp smithery-logout`; Smithery shut down its API on October 31, 2026 ([#18822](https://github.com/can1357/oh-my-pi/pull/18822) by [@samettemizer](https://github.com/samettemizer))
 
 ## [18.18.8] - 2026-11-11
 
@@ -58,9 +57,6 @@
 
 - `curl -fsSL https://omp.sh/install | sh` and `install.ps1` now install the standalone binary by default, even when bun is present, so installs get delta updates; pass `--source`/`-Source` for a bun package install
 - Ask forms can attach notes to selected options; those notes accompany the answers separately from submitted form values ([#18779](https://github.com/can1357/oh-my-pi/pull/18779) by [@Shadorain](https://github.com/Shadorain))
-### Added
-
-- Added Hacker News search (`web/hackernews`): `web_search` queries scoped to `site:news.ycombinator.com` now search HN stories and comments through the keyless HN Search API before the configured engines
 
 ### Fixed
 
@@ -5529,3 +5525,4 @@ Older entries are archived in [packages/coding-agent/CHANGELOG.md@72d5cf31d861](
 Older entries are archived in [packages/coding-agent/CHANGELOG.md@241e6b4d725c](https://github.com/can1357/oh-my-pi/blob/241e6b4d725c8801dd2dcd48c98cdb6886f7ed9e/packages/coding-agent/CHANGELOG.md).
 Older entries are archived in [packages/coding-agent/CHANGELOG.md@3af67e0bfbcd](https://github.com/can1357/oh-my-pi/blob/3af67e0bfbcda7add66798fb40dc08fb66b772c0/packages/coding-agent/CHANGELOG.md).
 Older entries are archived in [packages/coding-agent/CHANGELOG.md@1aace5f8634d](https://github.com/can1357/oh-my-pi/blob/1aace5f8634d376633d7b19035ef5f1ad30f02b0/packages/coding-agent/CHANGELOG.md).
+Older entries are archived in [packages/coding-agent/CHANGELOG.md@b81a844b520a](https://github.com/can1357/oh-my-pi/blob/b81a844b520af43d1d190a99fcdc8928e242b315/packages/coding-agent/CHANGELOG.md).
