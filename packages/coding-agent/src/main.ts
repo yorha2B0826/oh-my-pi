@@ -1993,8 +1993,6 @@ export async function runRootCommand(
 		if (isInteractive) await autoConnectIwanOnStartup();
 
 		const settingsInstance = await settingsPromise;
-		// Process-lifetime: broker/account-policy edits reconfigure the shared credential store.
-		createAuthStorageSettingsSync(settingsInstance, authStorage);
 		if (parsedArgs.approvalMode) {
 			// Runtime override (not persisted): every `tools.approvalMode` read downstream
 			// sees this value. The wrapper still honours --auto-approve / --yolo on top of it.
@@ -2022,6 +2020,8 @@ export async function runRootCommand(
 			"modelRegistry:init",
 			() => new ModelRegistry(authStorage, undefined, { settings: settingsInstance }),
 		);
+		// Process-lifetime: broker/account-policy/paused-provider edits reconfigure the shared credential store.
+		createAuthStorageSettingsSync(settingsInstance, authStorage, modelRegistry);
 		// Credential-scoped catalogs (e.g. GitHub Copilot) load from their cache
 		// rows only after credentials resolve. `--model` and `enabledModels` below
 		// resolve against the registry before `createAgentSession` hydrates it, so
