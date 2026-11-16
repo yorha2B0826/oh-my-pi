@@ -6648,6 +6648,7 @@ dependencies = [
  "image",
  "indexmap",
  "libc",
+ "libm",
  "log",
  "memchr",
  "napi",
