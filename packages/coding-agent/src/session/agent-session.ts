@@ -38,6 +38,7 @@ import {
 	type AsideMessage,
 	type BeforeToolCallContext,
 	type BeforeToolCallResult,
+	lastContextMessage,
 	type QueuedMessagePreparation,
 	type QueuedMessageQueue,
 	resolveTelemetry,
@@ -289,6 +290,7 @@ import type { ModelMention } from "@oh-my-pi/pi-tui/prompt/model-mention-syntax"
 import { ModelMentionRegistry, type ResolvedModelMention } from "./model-mentions";
 import { parseCommandArgs } from "../utils/command-args";
 import type { EditModeSetting } from "../edit/settings";
+import { getEditStore } from "../edit/store";
 import { resolveFileDisplayMode } from "../utils/file-display-mode";
 import { extractFileMentions, generateFileMentionMessages } from "../utils/file-mentions";
 import { normalizeModelContextImages } from "../utils/image-loading";
@@ -452,6 +454,7 @@ import {
 	type PrewalkCoordinatorHost,
 	type PrewalkRestartResult,
 } from "./prewalk";
+import { PROVIDER_REFUSAL_CUSTOM_TYPE, providerRefusalData } from "./provider-refusal";
 import {
 	IMAGE_ATTACHMENT_DESCRIPTION_TYPE,
 	isAdvisorCard,
@@ -496,6 +499,7 @@ import {
 	type SessionDumpLiveState,
 } from "./session-dump-format";
 import { collectSubSessions, type SubSession } from "./sub-sessions";
+import { completionRecord, journalCompletion } from "./model-usage-journal";
 import type { BranchSummaryEntry, NewSessionOptions, SessionEntry } from "./session-entries";
 import { SessionHandoff, type SessionHandoffHost } from "./session-handoff";
 import {
@@ -1024,6 +1028,22 @@ function isEvalActivity(message: AgentMessage): boolean {
 	);
 }
 
+/**
+ * Whether a dispose for `reason` ends the process under a running turn (an exit, the
+ * host's SIGTERM or SIGHUP, a crash) rather than the user stopping it (a quit, Ctrl+C,
+ * manual cleanup); see {@link AgentSessionDisposeOptions.reason}.
+ */
+function cutsTurnOff(reason: postmortem.Reason | undefined): boolean {
+	switch (reason) {
+		case undefined:
+		case postmortem.Reason.MANUAL:
+		case postmortem.Reason.SIGINT:
+			return false;
+		default:
+			return true;
+	}
+}
+
 export class AgentSession implements SettingsScope, AgentViewSession {
 	/**
 	 * Cross-thread identity token (`${homeThreadId}:${snowflake}`), unique per
@@ -1149,6 +1169,8 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 
 	/** Messages queued to be included with the next user prompt as context ("asides"). */
 	#pendingNextTurnMessages: CustomMessage[] = [];
+	/** Rows kept out of context that arrived while a run was live; drawn and saved once it ends or the next prompt starts. */
+	#pendingExcludedRows: CustomMessage[] = [];
 	#scheduledHiddenNextTurnGeneration: number | undefined = undefined;
 	/** Queued messages a session path took out of the agent queues to put back later (follow-ups
 	 *  parked behind an IRC wake turn, a session switch's rollback snapshot), in queue order. */
@@ -1581,6 +1603,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		// settled without ever going live (setup failure, abort, disposal) —
 		// they re-check liveness and keep their content.
 		this.#wakeDispatchLiveWaiters();
+		this.#flushExcludedRows();
 		this.#settleInFlight();
 	}
 
@@ -1754,6 +1777,37 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		for (const record of records) {
 			this.agent.emitExternalEvent({ type: "message_start", message: record });
 			this.agent.emitExternalEvent({ type: "message_end", message: record });
+		}
+	}
+
+	/** Draw and save the rows kept out of context that a live run queued (see {@link #pendingExcludedRows}). */
+	#flushExcludedRows(): void {
+		if (this.#pendingExcludedRows.length === 0) return;
+		const connected = this.#unsubscribeAgent !== undefined;
+		// Rows land only at a turn boundary: mid-stream, their message_start would replace the live stream message.
+		if (connected && this.agent.state.isStreaming) return;
+		const rows = this.#pendingExcludedRows;
+		this.#pendingExcludedRows = [];
+		if (connected) {
+			this.#recordWithoutTurn(rows);
+			return;
+		}
+		// Disposal detaches last, after its drain: a row still queued then goes with the session.
+		if (this.#isDisposed) return;
+		// A transition (/new, a switch, /compact) disconnects before it aborts the run, so no handler would save
+		// or draw these events: record them directly in the transcript they were sent to, as bash rows are, so a
+		// transition that keeps it (compaction, a rolled-back switch) still shows them.
+		for (const row of rows) {
+			this.agent.appendMessage(row);
+			this.sessionManager.appendCustomMessageEntry(
+				row.customType,
+				row.content,
+				row.display,
+				row.details,
+				row.attribution,
+				row.timestamp,
+				true,
+			);
 		}
 	}
 
@@ -3516,8 +3570,13 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	/** Plan-proposal handler consulted by `xd://propose` while plan mode is active. */
 	#planProposalHandler: PlanProposalHandler | undefined;
 
+	/**
+	 * The installed handler; while plan mode is active without one (a host that never installed it, or a mode
+	 * switch that dropped it), proposing still validates the plan and returns it for review.
+	 */
 	peekPlanProposalHandler(): PlanProposalHandler | undefined {
-		return this.#planProposalHandler;
+		if (this.#planProposalHandler) return this.#planProposalHandler;
+		return this.#planModeState?.enabled ? title => this.preparePlanForReview(title) : undefined;
 	}
 
 	/** The handler can ask the user to approve the plan mid-turn (ACP), so it runs as a {@link waitForUser}. */
@@ -3968,7 +4027,8 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		// artifact; `result` is its elided inline body, so link the raw capture.
 		// The capture lacks notices the tool appended after the stream (exit code,
 		// wall time, timeout), so the preview keeps `result`'s tail as well.
-		const rawArtifactId = meta?.truncation?.artifactId ?? meta?.limits?.columnTruncated?.artifactId;
+		const rawArtifactId =
+			meta?.truncation?.artifactId ?? meta?.limits?.columnTruncated?.artifactId ?? meta?.minimized?.artifactId;
 		if (rawArtifactId) {
 			const headTail = truncateMiddle(result, {
 				maxBytes: ASYNC_PREVIEW_MAX_CHARS,
@@ -4577,11 +4637,19 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 					// otherwise records emission time, which on rebuild excludes
 					// provider preparation / hook time from the prompt→yield anchor.
 					message.timestamp,
+					message.role === "custom" ? message.excludeFromContext : undefined,
 				);
 			}
 			if (message.role === "custom" && message.customType === "ttsr-injection") {
 				this.#ttsr.markInjectedFromDetails(message.details);
 			}
+			return;
+		}
+		// A refused turn stays out of the transcript (#persistSessionMessageIfMissing
+		// skips it); keep a non-context record of it instead. Recorded here, once per
+		// message_end, because mid-run compaction re-offers unpersisted turn messages.
+		if (message.role === "assistant" && this.#recovery.isClassifierRefusal(message)) {
+			this.sessionManager.appendCustomEntry(PROVIDER_REFUSAL_CUSTOM_TYPE, providerRefusalData(message));
 			return;
 		}
 		this.#persistSessionMessageIfMissing(message);
@@ -4743,6 +4811,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			this.#runToolCallIds = new Set(event.resumedToolCallIds);
 			this.#prunedTerminalFailure = undefined;
 			this.#advisors.onPrimaryAgentStart();
+			this.#models.settleAutoThinkingLevel();
 			// The previous loop's end lost the race to this start: announce its pause first,
 			// so every subscriber sees it before the next loop.
 			if (this.#loopEnd) this.#pauseLoop(this.#loopEnd);
@@ -6522,6 +6591,8 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 					usage: message.usage,
 					stopReason: message.stopReason,
 					errorMessage: message.errorMessage,
+					duration: message.duration,
+					ttft: message.ttft,
 					...(refresh ? { cacheRefresh: refresh } : {}),
 				},
 				{ sessionId: this.sessionId, parentId: this.sessionManager.getLeafId() },
@@ -7033,9 +7104,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		this.#fallbackExtensionTimers?.clearAll();
 		this.abortRetry();
 		this.abortCompaction();
-		// A process exit cuts a turn still in flight off instead of stopping it:
-		// label it as interrupted so `omp --restore` goes on with it.
-		const abortReason = options.reason === postmortem.Reason.EXIT ? INTERRUPTED_TURN_ERROR : undefined;
+		// A process ending under a turn still in flight cuts it off instead of
+		// stopping it: label it as interrupted so `omp --restore` goes on with it.
+		const abortReason = cutsTurnOff(options.reason) ? INTERRUPTED_TURN_ERROR : undefined;
 		const postPromptDrain = this.#cancelPostPromptTasks(abortReason);
 		this.agent.abort(abortReason);
 		try {
@@ -7285,6 +7356,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		// its record instead of landing here (mirrors newSession()).
 		this.#sessionGeneration++;
 		this.#pendingNextTurnMessages = [];
+		this.#pendingExcludedRows = [];
 		this.#experimentalContextNotesReminder = undefined;
 		this.#scheduledHiddenNextTurnGeneration = undefined;
 		// Reset the session_stop continuation chain: the queued continuation
@@ -9750,6 +9822,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			// Flush any pending bash messages before the new prompt
 			await this.#bash.flushPending();
 			this.#eval.flushPending();
+			this.#flushExcludedRows();
 			// This turn carries the assignment: IRC asides parked for it fold in ahead of the message.
 			this.#ircAwaitingAssignment = false;
 			this.#irc.flushPending();
@@ -9841,7 +9914,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 				const fileMentionMessages = await generateFileMentionMessages(fileMentions, this.sessionManager.getCwd(), {
 					autoResizeImages: cfgImagesAutoResize.get(this.settings),
 					useHashLines: resolveFileDisplayMode(this).hashLines,
-					snapshotStore: (this.editStore ??= new EditStore()),
+					// Mentions display tagged rows like `read`: record them where edit
+					// checks provenance, the tool session's store.
+					snapshotStore: this.#evalToolSession
+						? getEditStore(this.#evalToolSession)
+						: (this.editStore ??= new EditStore()),
 					signal: setupAbort.signal,
 				});
 				for (const fileMentionMessage of fileMentionMessages) {
@@ -10802,10 +10879,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		if (this.#advisors.autoResumeSuppressed) return false;
 		// Follow-up-only resume has no steer to inject, so Agent.continue() continues from the
 		// existing context tail — which must itself be a valid provider tail. An injected
-		// non-conversational tail (advisor card → `developer`, bash/python execution) would make
-		// the first model call invalid, so leave the follow-up queued for the next explicit resume.
-		const messages = this.agent.state.messages;
-		const last = messages[messages.length - 1];
+		// non-conversational tail (advisor card → `developer`, a `!` bash/python run sent to the model)
+		// would make the first model call invalid, so leave the follow-up queued for the next explicit
+		// resume. Rows kept out of context (`!!` runs, excluded extension rows) never reach the model,
+		// so they do not count as the tail.
+		const last = lastContextMessage(this.agent.state.messages);
 		return last?.role === "assistant" || last?.role === "toolResult";
 	}
 
@@ -11102,6 +11180,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	 * - Not streaming + no trigger: appends to state/session, no turn; with the default delivery
 	 *   (no deliverAs) a display:true message also paints to the interactive transcript
 	 *   immediately (message_start/message_end, no turn)
+	 * - `excludeFromContext`: never starts or extends a turn (`triggerTurn` and `aside` are ignored);
+	 *   while streaming, including prompt setup, it is queued like a `!!` bash row and drawn and
+	 *   saved when the run ends, the next prompt starts, or the session changes
 	 *
 	 * @returns true iff this call synchronously started a new turn (awaited
 	 * `agent.prompt`); false when the message was queued/appended without a turn
@@ -11202,9 +11283,25 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			display: normalizedPayload.display,
 			details,
 			attribution: normalizedPayload.attribution,
+			excludeFromContext: normalizedPayload.excludeFromContext,
 			timestamp: Date.now(),
 		};
 		const normalizedAppMessage = await this.#normalizeAgentMessageImages(appMessage);
+		if (normalizedAppMessage.excludeFromContext) {
+			// The model never sees this row, so it must not start or extend a turn: a steer or aside would
+			// buy a provider call on unchanged context. Mid-run (prompt setup included) it is queued like
+			// a `!!` bash row and drawn and saved when the run ends or the next prompt starts; idle it is
+			// appended where the caller asked.
+			if (this.isStreaming) {
+				this.#pendingExcludedRows.push(normalizedAppMessage);
+				return false;
+			}
+			options = {
+				...options,
+				triggerTurn: false,
+				deliverAs: options?.deliverAs === "nextTurn" ? "nextTurn" : undefined,
+			};
+		}
 		if (this.isStreaming) {
 			// Queued into a turn the agent owns: that turn holds the session. Busy only
 			// from another prompt's setup claims nothing (that prompt decides).
@@ -11251,6 +11348,8 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 				normalizedAppMessage.display,
 				normalizedAppMessage.details,
 				normalizedAppMessage.attribution,
+				normalizedAppMessage.timestamp,
+				normalizedAppMessage.excludeFromContext,
 			);
 			return false;
 		}
@@ -11313,6 +11412,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			// Its own timestamp, as `#persistMessageEnd` keeps one: a view rebuilt while its events are
 			// queued matches the entry to them by it.
 			normalizedAppMessage.timestamp,
+			normalizedAppMessage.excludeFromContext,
 		);
 		if (normalizedAppMessage.display === true) {
 			// Idle display append with no turn: notify session listeners so the interactive
@@ -12028,7 +12128,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			}),
 			// Journaled where the billed message exists, so a fork that ends in a
 			// provider error still records its spend before rejecting.
-			onUsage: message => this.#reportTitleUsage(usageOwner, message),
+			onUsage: message => this.#reportTitleUsage(usageOwner, "title-fork", message),
 			signal: AbortSignal.any([signal, AbortSignal.timeout(TITLE_FORK_TIMEOUT_MS)]),
 		})
 			.then(
@@ -12231,9 +12331,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 				customSystemPrompt ?? this.#titleSystemPrompt,
 				titleSignal,
 				parentSessionId,
-				message => {
+				(message, prompt) => {
 					costGate.record(message.usage.cost.total);
-					this.#reportTitleUsage(usageOwner, message);
+					this.#reportTitleUsage(usageOwner, "title", message, prompt);
 				},
 			),
 		);
@@ -12242,22 +12342,33 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	}
 
 	/**
-	 * Journal a title request's billed usage as a `model_usage` entry on the
-	 * branch it ran from, so `/usage`, `getUsageStatistics()`, and `omp stats`
-	 * count title spend. Titles are cosmetic: a stale session owner or a failed
-	 * journal write is logged and dropped rather than failing the title.
+	 * Journal a title request as a `model_usage` entry on the branch it ran
+	 * from: its billed usage, so `/usage`, `getUsageStatistics()`, and
+	 * `omp stats` count title spend, and what it was sent and replied. The
+	 * title model (`title`) records its `prompt`; the fork (`title-fork`) has
+	 * none, since it reads the conversation at `owner.parentId`. Titles are
+	 * cosmetic: a stale session owner or a failed journal write is logged and
+	 * dropped rather than failing the title.
 	 */
-	#reportTitleUsage(owner: { sessionId: string; parentId: string | null }, message: AssistantMessage): void {
+	#reportTitleUsage(
+		owner: { sessionId: string; parentId: string | null },
+		purpose: "title" | "title-fork",
+		message: AssistantMessage,
+		prompt?: string,
+	): void {
 		try {
 			this.sessionManager.appendModelUsage(
 				{
-					purpose: "title",
+					purpose,
 					api: message.api,
 					provider: message.provider,
 					model: message.model,
 					usage: message.usage,
 					stopReason: message.stopReason,
 					errorMessage: message.errorMessage,
+					duration: message.duration,
+					ttft: message.ttft,
+					completion: completionRecord(prompt, message),
 				},
 				owner,
 			);
@@ -12570,6 +12681,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		this.#cancelOwnAsyncJobs();
 		this.#closeAllProviderSessions("new session");
 		await this.#bash.flushPending();
+		this.#flushExcludedRows();
 		const bashTransition = this.#bash.beginSessionTransition({ persistDetached: options?.drop !== true });
 		let sessionTransitioned = false;
 		try {
@@ -12622,6 +12734,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			this.#memory.rekeyForCurrentSessionId();
 			await this.#memory.resetContextForNewTranscript();
 			this.#pendingNextTurnMessages = [];
+			this.#pendingExcludedRows = [];
 			// The abort above may have skipped the loop's final aside poll (issue: stranded
 			// asides survive an aborted turn by design so a resumed session can still see
 			// them); discard here so they cannot leak into the new session's transcript via
@@ -12686,6 +12799,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	/** Write pending bash output and every session entry to the session file, as {@link fork} does before copying it. */
 	async flushToDisk(): Promise<void> {
 		await this.#bash.flushPending();
+		this.#flushExcludedRows();
 		await this.sessionManager.flush();
 	}
 
@@ -14006,6 +14120,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		const history = args.history && (await this.#prepareSideHistory(args.history, args.signal));
 		assertEphemeralTurnReady();
 		const cacheSessionId = this.sessionId;
+		// Created with the snapshot so the entry sits on the leaf the turn read.
+		const usageReporter =
+			args.onUsage ?? (args.purpose ? journalCompletion(this.sessionManager, { purpose: args.purpose }) : undefined);
 		const snapshot = this.#buildEphemeralSnapshot(
 			args.promptText,
 			history,
@@ -14085,7 +14202,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		// Reported where the provider settles the request, before any later step can throw it away.
 		const reportUsage = (message: AssistantMessage) => {
 			try {
-				args.onUsage?.(message);
+				usageReporter?.(message);
 			} catch (error) {
 				logger.debug("ephemeral-turn: usage reporter failed", {
 					error: error instanceof Error ? error.message : String(error),
@@ -14195,9 +14312,14 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			const preservedBlocks: AssistantMessage["content"] = [];
 			// Preserve thinking blocks: DeepSeek-class encoders replay them as
 			// `reasoning_content` and reject the request (HTTP 400) when the field
-			// goes missing on a turn that previously emitted thinking.
+			// goes missing on a turn that previously emitted thinking. A block still
+			// streaming has no signature yet, so a reader whose classifier refuses
+			// quoted reasoning (Claude's `reasoning_extraction`) would get it as plain
+			// assistant text: leave those out.
+			const model = this.model;
+			const keepUnsigned = model !== undefined && readerIncludesThinking(model);
 			for (const c of streaming.content) {
-				if (c.type === "thinking") preservedBlocks.push(c);
+				if (c.type === "thinking" && (keepUnsigned || c.thinkingSignature?.trim())) preservedBlocks.push(c);
 			}
 			const streamingText = streaming.content
 				.filter((c): c is TextContent => c.type === "text")
@@ -14341,6 +14463,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		await this.#sessionBeforeSwitchReconciler?.();
 
 		await this.#bash.flushPending();
+		this.#flushExcludedRows();
 		// Flush pending writes before switching so restore snapshots reflect committed state.
 		await this.sessionManager.flush();
 		const previousSessionState = this.sessionManager.captureState();
@@ -14402,6 +14525,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		const previousSessionGenerationSettled = this.#sessionGenerationSettled;
 		this.#sessionGenerationSettled = generationSettled.promise;
 		this.#pendingNextTurnMessages = [];
+		this.#pendingExcludedRows = [];
 		this.#scheduledHiddenNextTurnGeneration = undefined;
 		this.#queuedMessageDrainBlocked = false;
 		this.#usagePreflightReadyForNextModelCall = false;
@@ -14815,6 +14939,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		}
 
 		await this.#bash.flushPending();
+		this.#flushExcludedRows();
 		// Flush pending writes before branching
 		await this.sessionManager.flush();
 		// Last refusal point. Nothing below is rolled back when the transition stops, so an
@@ -14824,6 +14949,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 
 		// Clear pending messages (bound to old session state)
 		this.#pendingNextTurnMessages = [];
+		this.#pendingExcludedRows = [];
 		this.#scheduledHiddenNextTurnGeneration = undefined;
 		this.#queuedMessageDrainBlocked = false;
 		this.#usagePreflightReadyForNextModelCall = false;
@@ -14951,6 +15077,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		this.#assertIdleForSnapshot("branch /btw");
 
 		this.#pendingNextTurnMessages = [];
+		this.#pendingExcludedRows = [];
 		this.#scheduledHiddenNextTurnGeneration = undefined;
 		this.#releaseQueuedTtsrReservations();
 		this.agent.replaceQueues([], []);
@@ -15076,6 +15203,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		if (queued) return queued;
 		using _transition = this.#beginSessionTransition();
 		await this.#bash.flushPending();
+		this.#flushExcludedRows();
 		const oldLeafId = this.sessionManager.getLeafId();
 
 		const targetEntry = this.sessionManager.getEntry(targetId);
@@ -15191,6 +15319,8 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			if (!apiKey) {
 				throw new Error(`No API key for ${model.provider}`);
 			}
+			// The summary is stored as a branch summary entry; only the spend needs journaling.
+			const journal = journalCompletion(this.sessionManager, { purpose: "branch-summary", usageOnly: true });
 			const result = await generateBranchSummary(entriesToSummarize, {
 				model,
 				apiKey: this.#modelRegistry.resolver(model, this.sessionId),
@@ -15204,7 +15334,10 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 				// path above (chatgpt-codex review on #3751).
 				completeImpl: async (requestModel, requestContext, requestOptions) => {
 					const stream = await this.#sideStreamFn(requestModel, requestContext, requestOptions);
-					return stream.result();
+					const message = await stream.result();
+					// One call per provider attempt, so a retried or failed one is billed too.
+					journal?.(message);
+					return message;
 				},
 			});
 			this.#branchSummaryAbortController = undefined;
