@@ -32,6 +32,7 @@
 ### Changed
 
 - Listing sessions across every project (`/resume` across projects, `archive.sessions(project="*")`, `archive.projects()`) is faster with thousands of project directories
+- In the interactive session, `wait` on background jobs now blocks for up to 4 minutes on its first call instead of returning after 5 seconds, saving a wasted turn per wait ([#19873](https://github.com/can1357/oh-my-pi/pull/19873) by [@H4vC](https://github.com/H4vC))
 - Updated MCP OAuth client name to "Codex"
 - Auto-retries are quieter: once a retry is scheduled, the failed attempt's error leaves the pinned banner and stays out of the transcript; the retry status line shows the reason, and a recovered retry leaves only a dim "retried" note
 - Selective commits (`/commit`, eval `commit`) no longer guess which changes a `bash` or `eval` call made. Edit-tool writes are attributed, and so is what the shell writes itself: builtins such as `sed -i`, `cp`, `mv`, `rm` and redirections such as `cat > file`. Files changed by programs you run (formatters, codegen) are listed under Unrecorded and a formatter's rewrite of your lines under Review, for you to `take`
@@ -47,6 +48,7 @@
 - The shell's `fd` builtin prints paths like fd: `./path` under an explicit `.`, with `-0`, or when a name starts with `-`; directories end in the path separator; `--strip-cwd-prefix` takes effect, `--format`'s `{//}` is the printed path's parent instead of an absolute one, and `--absolute-path` no longer prints `/./`
 - Sloppy edits reject incomplete Find/action pairs without writing, preserve numeric `||` expressions, and no longer mistake a nested or partial closing line for the end of a block range
 - OpenCode v2 MCP configurations now discover servers from `mcp.servers` while continuing to import flat `mcp` entries ([#19863](https://github.com/can1357/oh-my-pi/issues/19863))
+- Fixed ovnfs commands failing with "command not found" when `ovnfs.path` is a Windows path with backslashes, or contains spaces or `$` ([#19874](https://github.com/can1357/oh-my-pi/pull/19874) by [@H4vC](https://github.com/H4vC))
 - Failed browser launches no longer log URL userinfo, query strings (including OAuth device codes), or fragments ([#19844](https://github.com/can1357/oh-my-pi/pull/19844) by [@JustasMasiulis](https://github.com/JustasMasiulis))
 - `web_search` follows the web search order and exclusions configured for its own session, such as an ACP session opened in a project whose `.omp/config.yml` sets them, instead of the default chain ([#19837](https://github.com/can1357/oh-my-pi/pull/19837) by [@BUR4KBEY](https://github.com/BUR4KBEY), fixes [#11296](https://github.com/can1357/oh-my-pi/issues/11296))
 - Fixed MCP OAuth refresh failing with `AADSTS90009` on Microsoft Entra servers whose client is also the resource: refresh now repeats the granted scope (credentials saved earlier need one `/mcp reauth`) ([#19855](https://github.com/can1357/oh-my-pi/pull/19855) by [@jerry153fish](https://github.com/jerry153fish))
