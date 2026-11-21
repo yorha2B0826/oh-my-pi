@@ -12,7 +12,7 @@
 ### Added
 
 - Accepted Unicode set mode (`v`) in slash-delimited `secrets.yml` regexes.
-- Added the `magic_edit` edit mode (`edit.mode: magic_edit`): `edit` takes changes described in words under one `# path` line per file (or one `<edit file="path">` element with `edit.magic.format: xml`), and a fast model (`edit.magic.model`, by default the `smol` role) writes and applies each file's patch, returning the diffs
+- Added the `magic` edit mode (`edit.mode: magic`): `edit` takes changes described in words inside one `<edit file="path">` element per file (or under one `# path` line with `edit.magic.format: markdown`), and a fast model (`edit.magic.model`, a model or role alias such as `@slow`; by default the `smol` role) writes and applies each file's patch, returning the diffs
 - Sloppy edits can replace, delete or move a syntax block by its opening line without quoting its body, and rename a whole identifier with `*** Find all`
 - MCP servers now run in the omp daemon instead of inside every session: sessions with the same server configuration share one process for servers on MCP 2026-07-28, and `/mcp list` shows each server's state, pid and how many sessions share it. Turn off with `mcp.shared` ([#6819](https://github.com/can1357/oh-my-pi/issues/6819))
 - MCP servers start on first use: tool, prompt and resource lists come from a shared cache, so a session that never calls a server starts no process for it, and an unused 2026-07-28 server stops after `mcp.idleStopMinutes` (default 5) ([#2888](https://github.com/can1357/oh-my-pi/issues/2888))
@@ -25,6 +25,7 @@
 - `omp browser-relay install` reports which Chrome, Chromium or Brave profiles have the extension loaded. It prints the one manual Load unpacked step only when none does. The native host admits every registered extension folder's ID
 - Added a coloured extension status variant to `omp gallery --segment status` ([#19727](https://github.com/can1357/oh-my-pi/pull/19727) by [@robfeldmann](https://github.com/robfeldmann))
 - When a program in a bash `pty` console waits on your keys (a `sudo` password prompt, a `[y/N]` question), the terminal title and status record show the session as waiting on you and a notification is sent; turn the notification off with `pty.notify`
+- Eval `completion()` now captures its raw provider frames: a failure writes them to a `.log` file in the session artifacts directory and names the path in the error, and every call feeds them into the session's `/debug` raw-SSE view.
 - Extensions can identify which eval cell or kernel-defined tool dispatched a nested tool: `tool_call` and `tool_result` now include an optional `parentToolCallId` ([#19823](https://github.com/can1357/oh-my-pi/pull/19823) by [@baekjosh](https://github.com/baekjosh)).
 - Session transcripts get a full-text index (`~/.omp/agent/transcripts.db`) of user and assistant messages, built by the omp daemon in the background on the first `archive.search` and kept current on later ones, never on a session's own thread; the first build reads every top-level transcript once
 - Sessions now record approval prompts in their session file, even before the first reply: a `tool_approval_requested` entry when a tool call starts waiting on you (naming the dispatching eval call in `parentToolCallId` for calls made from an eval) and a `tool_approval_resolved` entry when it is approved, denied, aborted, or refused, so tools that read session files (sidebars, dashboards) can show a session waiting on approval ([#18837](https://github.com/can1357/oh-my-pi/pull/18837) by [@baekjosh](https://github.com/baekjosh))
@@ -46,9 +47,11 @@
 - Changed an in-place disassembler database to be identified by its real path, so one opened through a symlink gets a new id and dsm handle ([#19752](https://github.com/can1357/oh-my-pi/pull/19752) by [@m4ul3r](https://github.com/m4ul3r)).
 - Changed dsm.open() to reject a database file that belongs to another disassembler backend, with an error naming the backend to switch to ([#19752](https://github.com/can1357/oh-my-pi/pull/19752) by [@m4ul3r](https://github.com/m4ul3r)).
 - TTSR rules that cannot interrupt what is streaming (`interruptMode: never`, which includes the built-in style rules; `prose-only` rules on tool calls; `tool-only` rules on replies and reasoning) are checked once when the reply, reasoning or tool call ends instead of on every streamed chunk, and a tool call no interrupting rule applies to is not inspected while it streams. They still report the same matches and send the same reminders.
+- Eval `completion()` accepts a user-tagged model agent as its `model` (for example `completion(prompt, { model: "m1" })`); it runs the model the user pinned with `^model`, at the effort they tagged, instead of refusing anything but a tier
 
 ### Fixed
 
+- In Tern, answers keep their turn footer and its Copy button after a resume, a compaction or any other transcript rebuild; previously every answer drawn before the rebuild lost them
 - `--continue` (and `autoResume`) no longer resumes a session another running omp is writing, which duplicated its conversation into a new file on the first message; it starts a new session as plain `omp` does
 - `/handoff` now shows its progress like `/compact` while it writes the summary: a working row with a spinner and timer while the agent is idle, and a row above it while a turn runs. Previously only a one-off status line said it had started
 - On macOS, reading a cloud-only iCloud Drive, Desktop & Documents, Google Drive or Dropbox file now downloads it instead of failing with `EDEADLK`, in tools and in the commands omp runs, even when the terminal turned downloads off for its shells
