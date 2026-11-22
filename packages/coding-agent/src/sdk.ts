@@ -643,7 +643,7 @@ export interface CreateAgentSessionOptions {
 
 	/** Auth storage for credentials. Default: discoverAuthStorage(agentDir) */
 	authStorage?: AuthStorage;
-	/** Model registry. Default: discoverModels(authStorage, agentDir) */
+	/** Model registry. Default: constructed from <agentDir>/models.yml */
 	modelRegistry?: ModelRegistry;
 	/**
 	 * Request credential resolver. Defaults to the model registry's normal
@@ -2012,10 +2012,11 @@ export function createAutoLearnCaptureRunner(
  * const { session } = await createAgentSession();
  *
  * // With explicit model
- * import { getModel } from '@oh-my-pi/pi-ai';
+ * import { ThinkingLevel } from '@oh-my-pi/pi-agent-core';
+ * import { getBundledModel } from '@oh-my-pi/pi-catalog/models';
  * const { session } = await createAgentSession({
- *   model: getModel('anthropic', 'claude-opus-4-5'),
- *   thinkingLevel: 'high',
+ *   model: getBundledModel('anthropic', 'claude-opus-4-5'),
+ *   thinkingLevel: ThinkingLevel.High,
  * });
  *
  * // Continue previous session
@@ -5282,7 +5283,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			agent.replaceMessages(restored.messages);
 			// Only an explicit role alias re-owns a resumed branch; any other explicit model
 			// (subagent revival, SDK callers) keeps the role its history recorded.
-			if (model && options.modelRole) recordInitialModelChange(`${model.provider}/${model.id}`);
+			if (model && options.modelRole) recordInitialModelChange(formatModelStringWithRouting(model));
 			if (persistInitialServiceTier) {
 				sessionManager.appendServiceTierChange(
 					Object.keys(initialServiceTierByFamily).length > 0 ? initialServiceTierByFamily : null,
@@ -5290,7 +5291,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			}
 		} else {
 			// Save initial model, thinking level, and service tier for new sessions so they can be restored on resume.
-			if (model) recordInitialModelChange(`${model.provider}/${model.id}`);
+			if (model) recordInitialModelChange(formatModelStringWithRouting(model));
 			if (!autoThinking) {
 				// Do not write the `auto` selector before the first turn resolves; auto
 				// classification persists its concrete effort once a real user turn runs.
